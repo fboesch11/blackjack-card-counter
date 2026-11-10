@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blackjack Count Trainer</title>
+<style>
+/*__CSS__*/
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="masthead-inner">
+    <h1>Blackjack Count Trainer</h1>
+    <p class="tagline">Learn the game, learn the math, then keep the count.</p>
+  </div>
+  <form class="settings" id="settings" aria-label="Table rules">
+    <fieldset class="seg">
+      <legend>Decks</legend>
+      <label><input type="radio" name="decks" value="1"><span>1</span></label>
+      <label><input type="radio" name="decks" value="2"><span>2</span></label>
+      <label><input type="radio" name="decks" value="6"><span>6</span></label>
+    </fieldset>
+    <fieldset class="seg">
+      <legend>Dealer on soft 17</legend>
+      <label><input type="radio" name="h17" value="1"><span>Hits</span></label>
+      <label><input type="radio" name="h17" value="0"><span>Stands</span></label>
+    </fieldset>
+    <p class="fixed-rules">Always on: double after split, late surrender, blackjack pays 3:2, Hi-Lo count.</p>
+  </form>
+  <nav class="modes" role="tablist" aria-label="Mode">
+    <button role="tab" data-mode="learn">Learn to play</button>
+    <button role="tab" data-mode="quiz">Strategy quiz</button>
+    <button role="tab" data-mode="drill">Count drill</button>
+    <button role="tab" data-mode="count">Count while playing</button>
+  </nav>
+</header>
+<main id="app"></main>
+<footer class="foot">
+  <p>A math and thinking exercise built for a class project. Strategy charts: <span id="chart-sources">see each chart's source</span>.</p>
+</footer>
+<script>
+/*__DATA__*/
+</script>
+<script>
+/*__JS__*/
+</script>
+</body>
+</html>
