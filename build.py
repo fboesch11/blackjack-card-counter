@@ -100,12 +100,17 @@ def build(strict=False):
     css = (src / "styles.css").read_text(encoding="utf-8")
     js = "\n".join((src / f).read_text(encoding="utf-8") for f in JS_FILES)
     data = f"window.BJ_DATA = {{charts: {safe_json(charts)}, text: {safe_json(load_text())}}};"
+    # Version label: a hash of everything that goes into the page, so two copies with the
+    # same label are the same game (and a rebuild of unchanged sources keeps the label).
+    import hashlib
+    version = hashlib.sha256((html + css + data + js).encode("utf-8")).hexdigest()[:7]
+    html = html.replace("__VERSION__", version)
     for marker, value in (("/*__CSS__*/", css), ("/*__DATA__*/", data), ("/*__JS__*/", js)):
         if marker not in html:
             raise SystemExit(f"template.html is missing marker {marker}")
         html = html.replace(marker, value)
     OUT.write_text(html, encoding="utf-8")
-    print(f"Built {OUT.name} ({len(html):,} bytes); charts loaded: {sorted(charts) or 'none'}")
+    print(f"Built {OUT.name} version {version} ({len(html):,} bytes); charts loaded: {sorted(charts) or 'none'}")
     for p in problems:
         print(f"  note: {p}")
 
