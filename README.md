@@ -16,7 +16,9 @@ Final class project, built by two Claude agents working for Faith (`fboesch11`) 
 2. **Basic Strategy Quiz**: pick the right action for a hand, then see the correct play and why.
 3. **Count Drill**: cards flip one at a time, and you're asked for the running count at random points.
 4. **Count While Playing**: a full game that stops to check your running count and true count.
-5. **Full Table**: 1–6 other players play basic strategy at the table. You count every card and choose your seat.
+5. **Full Table Practice**: 1–6 other players (who sometimes miss a close call) share the table. You count every card and choose your seat.
+6. **Bet the Count**: a bankroll session against the dealer. Raise your bets when the count favors you; no hints during play, then a summary of every betting and strategy blunder.
+7. **The Math**: the set theory and probability behind counting, with interactive labs.
 
 ## Settings (available in every mode)
 

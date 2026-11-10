@@ -185,7 +185,7 @@
 
   /* =================================================================
    * Table game: used by "Learn to play" (coach on), "Count while playing" (count checks on)
-   * and "Full table" (count checks on, other players at the table)
+   * and "Full table practice" (count checks on, other players at the table)
    * ================================================================= */
   var SEAT_POS = { first: "First (acts first)", middle: "Middle", last: "Last (sees the most cards)" };
   function TableGame(root, opts) {
@@ -240,6 +240,12 @@
     this.afterMove();
   };
   // Other players play basic strategy, one move at a time so the user can follow and count.
+  // Each other player gets their own habit: how often they miss a close call (5% to 30%).
+  TableGame.prototype.botSlop = function (seat) {
+    this.slop = this.slop || {};
+    if (this.slop[seat] == null) this.slop[seat] = [0.05, 0.1, 0.15, 0.2, 0.3][rand(5)];
+    return this.slop[seat];
+  };
   TableGame.prototype.stopBots = function () { if (this.botTimer) { clearTimeout(this.botTimer); this.botTimer = null; } };
   TableGame.prototype.stop = TableGame.prototype.stopBots;
   TableGame.prototype.runBots = function () {
@@ -253,6 +259,8 @@
       var rec = S.recommend(CHARTS, rules(), hand, rd.dealer.cards[0], ok);
       // Without a chart, other players fall back to "hit below 17".
       var move = rec ? rec.action : (hand.total() < 17 ? "hit" : "stand");
+      // Now and then a player gets a close call wrong, like real players do.
+      if (rec && Math.random() < self.botSlop(hand.seat)) move = S.closeCallMistake(rec, hand, rd.dealer.cards[0], ok) || move;
       if (!ok[move]) move = hand.total() < 17 ? "hit" : "stand";
       rd.act(move);
       self.afterMove();
@@ -588,7 +596,7 @@
       h("p", { text: "You start with a set amount of money and play against the dealer with other players at the table. Before each hand, set your bet. Keep the Hi-Lo count yourself. Nothing on screen tells you the count or the right play while you're playing." }),
       h("p", { text: "When the true count is +2 or higher, the cards left favor you, so that's the time to bet more. Below +1, the house has the edge, so bet the minimum. Between +1 and +2, either is fine." }),
       h("p", { text: "Cash out whenever you like. The session also ends if you can't cover the table minimum. Then you get a summary of every betting and strategy blunder you made." }),
-      h("p", { class: "small muted", text: "The discard tray is shown, like at a real table, so you can estimate decks left. Insurance isn't offered in this game." }));
+      h("p", { class: "small muted", text: "The other players mostly play basic strategy but sometimes get a close call wrong. The discard tray is shown, like at a real table, so you can estimate decks left. Insurance isn't offered in this game." }));
   };
 
   SimGame.prototype.render = function () {
@@ -843,11 +851,14 @@
   };
   Quiz.prototype.render = function () {
     var self = this, root = clear(this.root), r = rules();
-    root.appendChild(h("div", { class: "intro" },
-      h("h2", { text: "Basic strategy quiz" }),
-      h("p", { text: "Basic strategy is the mathematically best play for every hand you can be dealt against every dealer upcard. It changes slightly with the number of decks and the soft 17 rule, so the quiz follows your settings above." })));
+    // Game first, instructions below (Faith: every tab except Learn to play).
+    root.appendChild(h("h2", { class: "drill-title", text: "Basic strategy quiz" }));
+    var help = h("section", { class: "intro drill-help", "aria-label": "How this mode works" },
+      h("h3", { text: "How this mode works" }),
+      h("p", { text: "Basic strategy is the mathematically best play for every hand you can be dealt against every dealer upcard. It changes slightly with the number of decks and the soft 17 rule, so the quiz follows your settings above." }),
+      h("p", { text: "Pick a move for each hand. You'll see the right play and why, and you can open the full chart below your score." }));
     if (this.note) root.appendChild(h("p", { class: "muted small", text: this.note }));
-    if (!CHARTS[S.ruleSetKey(r)]) { root.appendChild(chartMissingNotice(r)); return; }
+    if (!CHARTS[S.ruleSetKey(r)]) { root.appendChild(chartMissingNotice(r)); root.appendChild(help); return; }
 
     var focus = h("select", { "aria-label": "Hands to practice", onchange: function (e) { self.focus = e.target.value; self.next(); } },
       [["all", "All hands"], ["hard", "Hard totals"], ["soft", "Soft totals (with an ace)"], ["pair", "Pairs"]].map(function (o) {
@@ -874,6 +885,7 @@
       this.showChart ? "Hide the chart" : "Show the full chart");
     root.appendChild(h("div", { style: "margin-top:16px" }, toggle));
     if (this.showChart) root.appendChild(renderChart(r, this.answer && this.answer.rec));
+    root.appendChild(help);
   };
   Quiz.prototype.renderFeedback = function () {
     var self = this, A = this.answer;
@@ -1018,9 +1030,10 @@
 
   function tableIntro() {
     return h("div", { class: "intro" },
-      h("h2", { text: "Full table" }),
+      h("h2", { text: "Full table practice" }),
       h("p", { text: "A real table has other players, and every card they're dealt counts too. Here the other players play basic strategy on their own while you keep the running count of the whole table: their cards, your cards, and the dealer's." }),
-      h("p", { text: "Pick how many players and where you sit. Sitting last means you see everyone else's cards before you decide." }));
+      h("p", { text: "Pick how many players and where you sit. Sitting last means you see everyone else's cards before you decide." }),
+      h("p", { text: "The other players mostly play basic strategy, but now and then they get a close call wrong, like real players. Their mistakes don't change how you count." }));
   }
 
   var app = document.getElementById("app");
@@ -1029,7 +1042,7 @@
     quiz: function (el) { return new Quiz(el); },
     drill: function (el) { return new Drill(el); },
     count: function (el) { return new TableGame(el, { countChecks: true, intro: countIntro, introBelow: true, title: "Count while playing" }); },
-    table: function (el) { return new TableGame(el, { countChecks: true, others: 3, intro: tableIntro }); },
+    table: function (el) { return new TableGame(el, { countChecks: true, others: 3, intro: tableIntro, introBelow: true, title: "Full table practice" }); },
     math: function (el) { return new window.BJMath.MathTab(el, { h: h, clear: clear, cardEl: cardEl, rules: rules }); },
     sim: function (el) { return new SimGame(el, { others: 3 }); }
   };

@@ -61,7 +61,26 @@
     return { action: action, code: code, row: row, col: col, ruleSet: key };
   }
 
+  // A plausible wrong play on a close call, the kind real players make; null if the hand isn't a
+  // close call. Used to give the table's other players some variety (Faith's request). Obvious
+  // hands (hit 8, stand 19, split aces or eights) never get a wrong alternative.
+  //   double  -> just hit (D) or stand (Ds)        surrender -> play the hand out
+  //   split 2s, 3s, 4s, 6s, 7s, 9s -> don't split   hard 12-16 -> hit/stand swapped
+  //   soft 18 -> hit/stand swapped
+  function closeCallMistake(rec, hand, dealerUp, allowed) {
+    var row = rec.row, code = rec.code, act = rec.action, total = hand.total();
+    var up = BJ.cardValue(dealerUp), weak = up >= 2 && up <= 6;
+    var alt = null;
+    if (act === "double") alt = code === "Ds" ? "stand" : "hit";
+    else if (act === "surrender") alt = code === "Rs" ? "stand" : code === "Rp" ? "split" : "hit";
+    else if (act === "split" && /^P[234679]$/.test(row)) alt = total <= 11 ? "hit" : total >= 17 ? "stand" : (weak ? "stand" : "hit");
+    else if (/^H1[2-6]$/.test(row) && (act === "hit" || act === "stand")) alt = act === "hit" ? "stand" : "hit";
+    else if (row === "S18" && (act === "hit" || act === "stand")) alt = act === "hit" ? "stand" : "hit";
+    return alt && allowed[alt] ? alt : null;
+  }
+
   var api = {
+    closeCallMistake: closeCallMistake,
     CODE_NAMES: CODE_NAMES, ruleSetKey: ruleSetKey, ruleSetLabel: ruleSetLabel,
     rowKey: rowKey, resolve: resolve, recommend: recommend
   };
