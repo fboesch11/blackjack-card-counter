@@ -639,6 +639,11 @@ window.BJ_DATA = {charts: {"1deck_h17": {"meta": {"source": "https://wizardofodd
     if (s.total > 21) return s.total + ", bust";
     return (s.soft && s.total < 21 ? "soft " : "") + s.total;
   }
+  // Paragraphs from data/text/explanations.json when present, else the built-in defaults.
+  function paras(list, fallback) {
+    var src = Array.isArray(list) && list.length ? list : fallback;
+    return src.map(function (t) { return h("p", { text: String(t) }); });
+  }
   function chartMissingNotice(rules) {
     return h("p", { class: "notice" },
       "The basic strategy chart for " + S.ruleSetLabel(rules) +
@@ -1083,8 +1088,9 @@ window.BJ_DATA = {charts: {"1deck_h17": {"meta": {"source": "https://wizardofodd
     var self = this, root = clear(this.root);
     root.appendChild(h("div", { class: "intro" },
       h("h2", { text: "Count drill" }),
-      h("p", { text: "Hi-Lo gives every card a value: 2 through 6 count +1, 7 through 9 count 0, and tens, faces and aces count −1. Add them up as the cards go by. That total is the running count." }),
-      h("p", { text: "A plus count means more high cards are left in the shoe than low ones. A full shoe always adds up to exactly 0, so if you counted every card right you'll end at 0." })));
+      paras(TEXT.hilo_tutorial, [
+        "Hi-Lo gives every card a value: 2 through 6 count +1, 7 through 9 count 0, and tens, faces and aces count −1. Add them up as the cards go by. That total is the running count.",
+        "A plus count means more high cards are left in the shoe than low ones. A full shoe always adds up to exactly 0, so if you counted every card right you'll end at 0."])));
     if (this.note) root.appendChild(h("p", { class: "muted small", text: this.note }));
 
     var speed = h("select", { "aria-label": "Flip speed", onchange: function (e) { self.speed = parseInt(e.target.value, 10); self.play(); } },
@@ -1140,7 +1146,7 @@ window.BJ_DATA = {charts: {"1deck_h17": {"meta": {"source": "https://wizardofodd
     return h("div", { class: "intro" },
       h("h2", { text: "Count while playing" }),
       h("p", { text: "Play normally and keep the Hi-Lo running count of every card you see, including the dealer's hidden card once it's turned over. Every few hands the game stops and asks for your running count and true count." }),
-      h("p", { text: "True count = running count ÷ decks left in the shoe. Use the discard tray to estimate decks left, the same way players do at a real table." }));
+      paras(TEXT.true_count, ["True count = running count ÷ decks left in the shoe. Use the discard tray to estimate decks left, the same way players do at a real table."]));
   }
 
   function tableIntro() {
