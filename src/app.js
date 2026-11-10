@@ -315,37 +315,7 @@
     var playing = inRound && rd.isUserTurn();
     var ok = playing ? rd.available() : {};
 
-    // Dealer
-    var dealerCards = [];
-    if (rd) rd.dealer.cards.forEach(function (c, i) { dealerCards.push(i === 1 && !rd.holeRevealed ? cardEl(null) : cardEl(c)); });
-    var dealerTotal = rd && rd.holeRevealed ? totalText(rd.dealer) : (rd ? "showing " + BJ.upcardKey(rd.dealer.cards[0]) : "");
-    var dealer = h("section", { class: "spot", "aria-label": "Dealer" },
-      h("h3", null, "Dealer", h("span", { class: "total", text: dealerTotal })),
-      h("div", { class: "cards" }, dealerCards));
-
-    // Seats: one section per seat, in the order they act.
-    var multi = this.seats() > 1;
-    var seatsEl = h("div", { class: multi ? "seats" : null });
-    var userSeat = this.userSeat();
-    for (var seat = 0; seat < this.seats(); seat++) {
-      var hands = h("div", { class: "hands" });
-      var mine = seat === userSeat;
-      if (rd) rd.hands.forEach(function (hd, i) {
-        if (hd.seat !== seat) return;
-        var res = rd.results ? rd.results[i] : null;
-        var resText = res ? ({ blackjack: "Blackjack, win 1.5", win: "Win", push: "Push (tie)", lose: "Lose",
-          bust: "Bust", surrender: "Surrendered, half back" })[res.outcome] + (mine && res.net ? " (" + signed(res.net) + ")" : "") : "";
-        var isActive = inRound && i === rd.active && (multi || rd.hands.length > 1);
-        hands.appendChild(h("div", { class: "hand" + (isActive ? " active" : "") },
-          h("div", { class: "cards" }, hd.cards.map(function (c) { return cardEl(c); })),
-          h("div", { class: "res" }, h("b", { text: totalText(hd) }), hd.doubled ? " (doubled)" : "",
-            resText ? h("span", { class: mine ? (res.net > 0 ? "right" : res.net < 0 ? "wrong" : "") : "muted" }, " " + resText) : null)));
-      });
-      var label = multi ? this.seatName(seat) : (rd && rd.hands.length > 1 ? "Your hands" : "You");
-      seatsEl.appendChild(h("section", { class: "spot" + (multi ? " seat" : "") + (multi && mine ? " mine" : ""), "aria-label": label },
-        h("h3", { text: label }), hands));
-    }
-    var player = seatsEl;
+    var t = this.buildTable(inRound), dealer = t.dealer, player = t.seats;
 
     // Actions
     var actions = h("div", { class: "row actions" });
@@ -386,6 +356,41 @@
       if (h2) h2.replaceWith(h("h3", { text: "How this mode works" }));
       root.appendChild(help);
     }
+  };
+  // Dealer and seat sections for the current round (shared with the betting game).
+  TableGame.prototype.buildTable = function (inRound) {
+    var self = this, rd = this.round;
+    // Dealer
+    var dealerCards = [];
+    if (rd) rd.dealer.cards.forEach(function (c, i) { dealerCards.push(i === 1 && !rd.holeRevealed ? cardEl(null) : cardEl(c)); });
+    var dealerTotal = rd && rd.holeRevealed ? totalText(rd.dealer) : (rd ? "showing " + BJ.upcardKey(rd.dealer.cards[0]) : "");
+    var dealer = h("section", { class: "spot", "aria-label": "Dealer" },
+      h("h3", null, "Dealer", h("span", { class: "total", text: dealerTotal })),
+      h("div", { class: "cards" }, dealerCards));
+
+    // Seats: one section per seat, in the order they act.
+    var multi = this.seats() > 1;
+    var seatsEl = h("div", { class: multi ? "seats" : null });
+    var userSeat = this.userSeat();
+    for (var seat = 0; seat < this.seats(); seat++) {
+      var hands = h("div", { class: "hands" });
+      var mine = seat === userSeat;
+      if (rd) rd.hands.forEach(function (hd, i) {
+        if (hd.seat !== seat) return;
+        var res = rd.results ? rd.results[i] : null;
+        var resText = res ? ({ blackjack: "Blackjack, win 1.5", win: "Win", push: "Push (tie)", lose: "Lose",
+          bust: "Bust", surrender: "Surrendered, half back" })[res.outcome] + (mine && res.net ? " (" + (self.fmtNet ? self.fmtNet(res.net) : signed(res.net)) + ")" : "") : "";
+        var isActive = inRound && i === rd.active && (multi || rd.hands.length > 1);
+        hands.appendChild(h("div", { class: "hand" + (isActive ? " active" : "") },
+          h("div", { class: "cards" }, hd.cards.map(function (c) { return cardEl(c); })),
+          h("div", { class: "res" }, h("b", { text: totalText(hd) }), hd.doubled ? " (doubled)" : "",
+            resText ? h("span", { class: mine ? (res.net > 0 ? "right" : res.net < 0 ? "wrong" : "") : "muted" }, " " + resText) : null)));
+      });
+      var label = multi ? this.seatName(seat) : (rd && rd.hands.length > 1 ? "Your hands" : "You");
+      seatsEl.appendChild(h("section", { class: "spot" + (multi ? " seat" : "") + (multi && mine ? " mine" : ""), "aria-label": label },
+        h("h3", { text: label }), hands));
+    }
+    return { dealer: dealer, seats: seatsEl };
   };
   TableGame.prototype.renderCoach = function () {
     var m = this.coachMsg, r = rules();
@@ -437,6 +442,366 @@
       side.appendChild(h("p", { class: "small muted", text: "Keep a running count in your head as cards appear. The game stops to check it after the hand." }));
     }
     return side;
+  };
+
+  /* =================================================================
+   * Bet the count: a bankroll session against the dealer with bots. No hints or count checks
+   * during play; when the player cashes out or runs out of money, a summary lists every blunder.
+   * ================================================================= */
+  // Thresholds for betting blunders. Below +1 the house still has the edge; at +2 and up the
+  // player does (simulation figures cited on screen). In between, either bet is accepted.
+  var SIM = { noEdgeBelow: 1, edgeAt: 2, riskyShare: 0.25, maxUnits: 50 };
+  var SIM_SRC = {
+    edge: "https://wizardofvegas.com/forum/questions-and-answers/math/36973-blackjack-card-count-probability/",
+    action: "https://www.actionnetwork.com/casino/blackjack/how-to-count-cards",
+    wiki: "https://en.wikipedia.org/wiki/Card_counting",
+    hilo: "https://wizardofodds.com/games/blackjack/card-counting/high-low/"
+  };
+  function money(x) {
+    var r = Math.round(x * 100) / 100, a = Math.abs(r);
+    return (r < 0 ? "−" : "") + "$" + a.toLocaleString("en-US", { minimumFractionDigits: a % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  }
+  function moneyNet(x) { return (x > 0 ? "+" : "") + money(x); }
+  // Suggested bet in table-minimum units by true count. This is the game's own teaching ramp,
+  // not a published standard: 1 unit up to +1, then 2, 4, 6 and 8 units at +2, +3, +4, +5 and up.
+  function rampUnits(tc) { var t = wholeTC(tc); return t <= 1 ? 1 : t === 2 ? 2 : t === 3 ? 4 : t === 4 ? 6 : 8; }
+  function pearson(xs, ys) {
+    var n = xs.length; if (n < 3) return null;
+    var mx = 0, my = 0, i; for (i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; } mx /= n; my /= n;
+    var c = 0, vx = 0, vy = 0;
+    for (i = 0; i < n; i++) { c += (xs[i] - mx) * (ys[i] - my); vx += Math.pow(xs[i] - mx, 2); vy += Math.pow(ys[i] - my, 2); }
+    return vx && vy ? c / Math.sqrt(vx * vy) : null;
+  }
+
+  function SimGame(root, opts) {
+    this.setup = { bank: 1000, min: 10, others: 3, seatPos: "last" };
+    TableGame.call(this, root, opts);
+  }
+  SimGame.prototype = Object.create(TableGame.prototype);
+  SimGame.prototype.constructor = SimGame;
+  SimGame.prototype.fmtNet = moneyNet;
+
+  // A rules change mid-session ends the session (so its results aren't lost); otherwise back to setup.
+  SimGame.prototype.reset = function (note) {
+    this.stopBots();
+    if (this.phase === "play" && this.session && this.session.hands.length && (!this.round || this.round.phase === "done")) {
+      this.finish("rules"); return;
+    }
+    this.phase = "setup"; this.session = null; this.round = null; this.msg = note || "";
+    this.render();
+  };
+  SimGame.prototype.start = function () {
+    var r = rules(), st = this.setup;
+    this.others = st.others; this.seatPos = st.seatPos;
+    this.shoe = new BJ.Shoe(r.decks); this.counter = new BJ.Counter();
+    this.session = { start: st.bank, bank: st.bank, min: st.min, max: st.min * SIM.maxUnits, bet: st.min,
+      hands: [], strategy: [], decisions: 0, end: null, finalGuess: null, rules: S.ruleSetLabel(r) };
+    this.phase = "play"; this.round = null; this.msg = "";
+    this.render();
+  };
+  SimGame.prototype.betting = function () { return this.phase === "play" && (!this.round || this.round.phase === "done"); };
+  SimGame.prototype.betProblem = function () {
+    var ses = this.session, cap = Math.min(ses.max, ses.bank);
+    if (ses.bet < ses.min) return "The table minimum is " + money(ses.min) + ".";
+    if (ses.bet > ses.bank) return "You only have " + money(ses.bank) + ".";
+    if (ses.bet > cap) return "The table maximum is " + money(ses.max) + ".";
+    return "";
+  };
+  SimGame.prototype.setBet = function (v) {
+    if (!this.betting()) return;
+    this.session.bet = Math.max(0, Math.round(v * 100) / 100);
+    this.render();
+  };
+  SimGame.prototype.deal = function () {
+    var self = this, ses = this.session;
+    if (!this.betting() || this.betProblem()) return;
+    if (this.shoe.needsShuffle(this.seats() * 4 + 6)) {
+      this.shoe.shuffle(); this.counter.reset();
+      this.msg = "The dealer shuffled. Start your count over at 0.";
+    } else this.msg = "";
+    // The count at the moment the bet goes out is what the bet is graded against.
+    ses.hands.push({ n: ses.hands.length + 1, bet: ses.bet, tc: this.counter.trueCount(this.shoe), rc: this.counter.running,
+      decksLeft: this.shoe.decksRemaining(), bankBefore: ses.bank, net: 0, outcome: "" });
+    this.round = new BJ.Round(this.shoe, rules(), {
+      seats: this.seats(), userSeat: this.userSeat(),
+      onExpose: function (c) { self.counter.see(c); },
+      onReshuffle: function () {
+        self.counter.reset();
+        self.msg = "The shoe ran out mid-hand and the dealer shuffled the discards. Start your count over at 0.";
+      }
+    });
+    this.round.start(ses.bet);
+    this.afterMove();
+  };
+  // What the player can do now, including whether there's money left to double or split.
+  SimGame.prototype.allowedNow = function () {
+    var rd = this.round, ok = rd.available(), hand = rd.current();
+    var onTable = rd.seatHands(rd.userSeat).reduce(function (sum, x) { return sum + x.bet; }, 0);
+    if (this.session.bank - onTable < hand.bet) { ok.double = false; ok.split = false; }
+    return ok;
+  };
+  SimGame.prototype.act = function (action) {
+    var rd = this.round;
+    if (!rd || rd.phase !== "player" || !rd.isUserTurn()) return;
+    var ok = this.allowedNow();
+    if (!ok[action]) return;
+    var hand = rd.current(), up = rd.dealer.cards[0], ses = this.session;
+    var rec = S.recommend(CHARTS, rules(), hand, up, ok);
+    ses.decisions++;
+    if (rec && rec.action !== action)
+      ses.strategy.push({ n: ses.hands.length, cards: hand.cards.slice(), up: up, total: totalText(hand), did: action, should: rec.action,
+        code: rec.code, tc: this.counter.trueCount(this.shoe) });
+    rd.act(action);
+    this.afterMove();
+  };
+  SimGame.prototype.afterMove = function () {
+    var rd = this.round, ses = this.session;
+    if (rd && rd.phase === "done" && !rd.settled) {
+      rd.settled = true;
+      var net = rd.net(), last = ses.hands[ses.hands.length - 1];
+      ses.bank = Math.round((ses.bank + net) * 100) / 100;
+      last.net = net;
+      last.outcome = rd.results.filter(function (x) { return x.seat === rd.userSeat; }).map(function (x) { return x.outcome; }).join(", ");
+      if (ses.bank < ses.min) { this.finish("broke"); return; }
+      if (ses.bet > ses.bank) ses.bet = Math.floor(ses.bank);
+    }
+    this.render();
+    this.runBots();
+  };
+  SimGame.prototype.finish = function (reason) {
+    this.stopBots();
+    this.session.end = reason;
+    this.session.finalCount = this.counter.running;
+    this.session.finalTC = this.counter.trueCount(this.shoe);
+    this.phase = "final";
+    this.render();
+  };
+  SimGame.prototype.key = function (k) {
+    if (this.phase !== "play") return;
+    if (k === "n" || k === "Enter") { this.deal(); return; }
+    for (var a in ACTION_KEY) if (ACTION_KEY[a] === k) this.act(a);
+  };
+
+  SimGame.prototype.intro = function () {
+    return h("section", { class: "intro drill-help", "aria-label": "How this mode works" },
+      h("h3", { text: "How this mode works" }),
+      h("p", { text: "You start with a set amount of money and play against the dealer with other players at the table. Before each hand, set your bet. Keep the Hi-Lo count yourself. Nothing on screen tells you the count or the right play while you're playing." }),
+      h("p", { text: "When the true count is +2 or higher, the cards left favor you, so that's the time to bet more. Below +1, the house has the edge, so bet the minimum. Between +1 and +2, either is fine." }),
+      h("p", { text: "Cash out whenever you like. The session also ends if you can't cover the table minimum. Then you get a summary of every betting and strategy blunder you made." }),
+      h("p", { class: "small muted", text: "The discard tray is shown, like at a real table, so you can estimate decks left. Insurance isn't offered in this game." }));
+  };
+
+  SimGame.prototype.render = function () {
+    var root = clear(this.root);
+    root.appendChild(h("h2", { class: "drill-title", text: "Bet the count" }));
+    if (this.phase === "setup") this.renderSetup(root);
+    else if (this.phase === "play") this.renderPlay(root);
+    else if (this.phase === "final") this.renderFinal(root);
+    else this.renderSummary(root);
+    if (this.phase !== "summary") root.appendChild(this.intro());
+  };
+  SimGame.prototype.renderSetup = function (root) {
+    var self = this, st = this.setup;
+    function sel(label, key, opts, fmtOpt) {
+      return h("label", { class: "setup-field" }, h("span", { text: label }),
+        h("select", { "aria-label": label, onchange: function (e) { st[key] = isNaN(+e.target.value) ? e.target.value : +e.target.value; } },
+          opts.map(function (v) { return h("option", { value: v, selected: v === st[key] ? "selected" : null }, fmtOpt(v)); })));
+    }
+    if (this.msg) root.appendChild(h("p", { class: "muted small", text: this.msg }));
+    root.appendChild(h("div", { class: "panel setup" },
+      h("p", { text: "Rules: " + S.ruleSetLabel(rules()) + ". Change decks or soft 17 above before you start." }),
+      h("div", { class: "setup-grid" },
+        sel("Starting money", "bank", [500, 1000, 2000, 5000], money),
+        sel("Table minimum", "min", [5, 10, 25], money),
+        sel("Other players", "others", [0, 1, 2, 3, 4, 5, 6], String),
+        sel("Your seat", "seatPos", Object.keys(SEAT_POS), function (k) { return SEAT_POS[k]; })),
+      h("p", { class: "small muted", text: "Table maximum is " + SIM.maxUnits + " times the minimum." }),
+      h("button", { class: "btn primary", type: "button", onclick: function () { self.start(); } }, "Start session")));
+  };
+  SimGame.prototype.renderPlay = function (root) {
+    var self = this, rd = this.round, ses = this.session;
+    var inRound = rd && rd.phase === "player";
+    var mine = inRound && rd.isUserTurn();
+    var t = this.buildTable(inRound);
+
+    var actions = h("div", { class: "row actions" });
+    if (mine) {
+      var ok = this.allowedNow();
+      ACTIONS.forEach(function (a) {
+        actions.appendChild(h("button", { class: "btn", disabled: !ok[a], onclick: function () { self.act(a); } },
+          ACTION_LABEL[a], h("kbd", { text: ACTION_KEY[a].toUpperCase() })));
+      });
+    } else if (inRound) {
+      actions.appendChild(h("p", { class: "muted", text: this.seatName(rd.current().seat) + " is playing." }));
+    }
+    var main = h("div", null, t.dealer, t.seats, actions, h("p", { class: "msg", "aria-live": "polite", text: this.msg }));
+    if (this.betting()) main.appendChild(this.renderBet());
+
+    var used = 1 - this.shoe.remaining() / this.shoe.total;
+    var side = h("aside", { class: "panel side sim-side" },
+      h("p", { class: "bank" }, h("span", { class: "small muted", text: "Your money" }), h("b", { class: "num", text: money(ses.bank) })),
+      h("p", { class: "small muted num", text: "Started with " + money(ses.start) + ". Hands played: " + ses.hands.length + "." }),
+      h("div", { class: "tray" },
+        h("div", { class: "small muted", text: "Discard tray (cards already played)" }),
+        h("div", { class: "tray-bar", role: "img", "aria-label": Math.round(used * 100) + "% of the shoe played" },
+          h("div", { class: "tray-fill", style: "width:" + (used * 100).toFixed(1) + "%" })),
+        h("div", { class: "small muted num", text: "About " + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " of " + this.shoe.decks + " decks left" })),
+      h("button", { class: "btn", type: "button", disabled: !this.betting(), onclick: function () { self.finish("cashout"); } }, "Cash out and see summary"));
+    root.appendChild(h("div", { class: "table-grid with-side" }, main, side));
+  };
+  SimGame.prototype.renderBet = function () {
+    var self = this, ses = this.session, prob = this.betProblem();
+    // Casino chip values at or above the table minimum.
+    var chips = [ses.min, 25, 100, 500].filter(function (v, i, a) { return v >= ses.min && a.indexOf(v) === i; }).map(function (v) {
+      return h("button", { class: "btn chip", type: "button", onclick: function () { self.setBet(ses.bet + v); } }, "+" + money(v));
+    });
+    return h("div", { class: "panel bet-panel" },
+      h("p", { class: "bet-line" }, "Your bet ", h("b", { class: "num", text: money(ses.bet) })),
+      h("div", { class: "row" }, chips,
+        h("button", { class: "btn", type: "button", onclick: function () { self.setBet(ses.min); } }, "Minimum"),
+        h("button", { class: "btn", type: "button", onclick: function () { self.setBet(0); } }, "Clear")),
+      prob ? h("p", { class: "wrong small", role: "alert", text: prob }) : null,
+      h("div", { class: "row", style: "margin-top:10px" },
+        h("button", { class: "btn primary", type: "button", disabled: !!prob, onclick: function () { self.deal(); } },
+          "Deal " + money(ses.bet), h("kbd", { text: "N" }))));
+  };
+  SimGame.prototype.renderFinal = function (root) {
+    var self = this, ses = this.session;
+    var why = { cashout: "You cashed out.", broke: "You don't have enough left for the " + money(ses.min) + " minimum, so the session is over.",
+      rules: "The table rules changed, so the session ended." }[ses.end];
+    var field = countField("final-rc", "Running count when you stopped");
+    var form = countForm([field], function (v) { ses.finalGuess = v; self.phase = "summary"; self.render(); },
+      h("p", null, h("b", { text: why + " One last check before your summary: what's your running count?" })));
+    form.appendChild(h("button", { class: "btn", type: "button", style: "margin-top:8px",
+      onclick: function () { self.phase = "summary"; self.render(); } }, "Skip"));
+    root.appendChild(h("div", { class: "panel" }, form));
+  };
+
+  SimGame.prototype.analyze = function () {
+    var ses = this.session, out = { noEdge: 0, missed: 0, risky: 0, wagered: 0, biggest: 0, blunders: [] };
+    ses.hands.forEach(function (x) {
+      var tc = tenth(x.tc);
+      x.suggest = Math.min(rampUnits(x.tc) * ses.min, ses.max, x.bankBefore);
+      x.flags = [];
+      if (x.bet > ses.min && tc < SIM.noEdgeBelow) { x.flags.push("noEdge"); out.noEdge++; }
+      // Only a blunder if there was money to raise with.
+      if (x.bet <= ses.min && tc >= SIM.edgeAt && x.bankBefore >= 2 * ses.min) { x.flags.push("missed"); out.missed++; }
+      if (x.bet > SIM.riskyShare * x.bankBefore) { x.flags.push("risky"); out.risky++; }
+      out.wagered += x.bet; out.biggest = Math.max(out.biggest, x.bet);
+      x.flags.forEach(function (f) { out.blunders.push({ n: x.n, kind: f, hand: x }); });
+    });
+    ses.strategy.forEach(function (s) { out.blunders.push({ n: s.n, kind: "strategy", s: s }); });
+    out.blunders.sort(function (a, b) { return a.n - b.n; });
+    out.corr = pearson(ses.hands.map(function (x) { return x.tc; }), ses.hands.map(function (x) { return x.bet; }));
+    return out;
+  };
+  // Scatter of bet size against the true count when the bet went out, with the no-edge and
+  // edge zones shaded. Points with a betting blunder are drawn in red.
+  function betChart(ses) {
+    var NS = "http://www.w3.org/2000/svg", W = 640, H = 240, L = 48, B = 34, T = 12, R = 10;
+    var hs = ses.hands; if (!hs.length) return null;
+    var tcs = hs.map(function (x) { return tenth(x.tc); });
+    var lo = Math.min(-4, Math.floor(Math.min.apply(null, tcs))), hi = Math.max(6, Math.ceil(Math.max.apply(null, tcs)));
+    var maxU = Math.max(4, Math.ceil(Math.max.apply(null, hs.map(function (x) { return x.bet / ses.min; }))));
+    var X = function (v) { return L + (v - lo) / (hi - lo) * (W - L - R); };
+    var Y = function (u) { return H - B - (u / (maxU * 1.12)) * (H - B - T - 14); };  // headroom for the zone labels
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H); svg.setAttribute("class", "dist bets");
+    svg.setAttribute("role", "img"); svg.setAttribute("aria-label", "Bet size against true count for each hand");
+    function el(tag, a, txt) { var e = document.createElementNS(NS, tag); for (var k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; svg.appendChild(e); return e; }
+    el("rect", { x: X(lo), y: T, width: X(SIM.noEdgeBelow) - X(lo), height: H - B - T, class: "zone-house" });
+    el("rect", { x: X(SIM.edgeAt), y: T, width: X(hi) - X(SIM.edgeAt), height: H - B - T, class: "zone-player" });
+    el("text", { x: X(lo) + 6, y: T + 14, class: "tick" }, "House edge: bet the minimum");
+    el("text", { x: X(hi) - 6, y: T + 14, "text-anchor": "end", class: "tick" }, "Your edge: bet more");
+    el("line", { x1: L, y1: H - B, x2: W - R, y2: H - B, class: "axis" });
+    el("line", { x1: L, y1: T, x2: L, y2: H - B, class: "axis" });
+    for (var v = lo; v <= hi; v++) if ((v - lo) % (hi - lo > 12 ? 2 : 1) === 0)
+      el("text", { x: X(v), y: H - B + 16, "text-anchor": "middle", class: "tick" }, (v > 0 ? "+" : "") + v);
+    el("text", { x: (L + W) / 2, y: H - 4, "text-anchor": "middle", class: "tick" }, "True count when you bet");
+    [1, Math.round(maxU / 2), maxU].forEach(function (u) { el("text", { x: L - 6, y: Y(u) + 4, "text-anchor": "end", class: "tick" }, money(u * ses.min)); });
+    hs.forEach(function (x) {
+      var bad = x.flags && x.flags.some(function (f) { return f !== "risky"; });
+      var c = el("circle", { cx: X(tenth(x.tc)), cy: Y(x.bet / ses.min), r: 5, class: "pt" + (bad ? " bad" : "") });
+      var tt = document.createElementNS(NS, "title"); tt.textContent = "Hand " + x.n + ": " + money(x.bet) + " at " + tcText(x.tc); c.appendChild(tt);
+    });
+    return svg;
+  }
+  SimGame.prototype.renderSummary = function (root) {
+    var self = this, ses = this.session, A = this.analyze();
+    var link = function (u, t) { return h("a", { href: u, rel: "noopener", text: t }); };
+    var why = { cashout: "You cashed out.", broke: "You ran out of money for the " + money(ses.min) + " minimum.", rules: "The table rules changed, so the session ended." }[ses.end];
+    var net = ses.bank - ses.start;
+    root.appendChild(h("p", { text: why + " Rules: " + ses.rules + "." }));
+    root.appendChild(h("div", { class: "panel sim-results" },
+      h("div", { class: "result-row" },
+        h("p", null, h("span", { class: "small muted", text: "Started" }), h("b", { class: "num", text: money(ses.start) })),
+        h("p", null, h("span", { class: "small muted", text: "Ended" }), h("b", { class: "num", text: money(ses.bank) })),
+        h("p", null, h("span", { class: "small muted", text: "Result" }), h("b", { class: "num " + (net > 0 ? "right" : net < 0 ? "wrong" : ""), text: moneyNet(net) })),
+        h("p", null, h("span", { class: "small muted", text: "Hands" }), h("b", { class: "num", text: String(ses.hands.length) })),
+        h("p", null, h("span", { class: "small muted", text: "Total bet" }), h("b", { class: "num", text: money(A.wagered) })),
+        h("p", null, h("span", { class: "small muted", text: "Biggest bet" }), h("b", { class: "num", text: money(A.biggest) }))),
+      h("p", { class: "small muted", text: "One session is a small sample. Winning or losing money here says little about whether you played well; the blunders below do." })));
+
+    var countLine = ses.finalGuess == null ? "You skipped the final count check." :
+      (ses.finalGuess === ses.finalCount ? "Your final running count was right: " + signed(ses.finalCount) + "." :
+        "You said " + signed(ses.finalGuess) + "; the running count was " + signed(ses.finalCount) + ".");
+    root.appendChild(h("section", { class: "math-sec" }, h("h3", { text: "Your count" }),
+      h("p", { text: countLine + " The true count was " + tcText(ses.finalTC) + "." })));
+
+    var betBl = A.noEdge + A.missed + A.risky;
+    root.appendChild(h("section", { class: "math-sec" }, h("h3", { text: "Betting" }),
+      h("p", { text: betBl ? "Betting blunders: " + betBl + " (raised with no edge " + A.noEdge + ", stayed at the minimum with an edge " + A.missed + ", risky bets " + A.risky + ")."
+        : "No betting blunders. Your bets followed the count." }),
+      betChart(ses),
+      h("p", { class: "small", text: A.corr == null ? "Play more hands with different bets to see how closely your bets followed the count." :
+        "How closely your bets followed the true count: " + A.corr.toFixed(2) + " (1.00 = your bet rose exactly with the count, 0 = no relationship; calculated here)." })));
+
+    root.appendChild(h("section", { class: "math-sec" }, h("h3", { text: "Strategy" }),
+      h("p", { text: ses.strategy.length ? "Strategy blunders: " + ses.strategy.length + " of " + ses.decisions + " decisions didn't match basic strategy." :
+        (ses.decisions ? "All " + ses.decisions + " of your decisions matched basic strategy." : "You didn't make any playing decisions.") })));
+
+    var KIND = { noEdge: "Raised with no edge", missed: "Stayed at the minimum with an edge", risky: "Risky bet", strategy: "Strategy" };
+    function describe(b) {
+      if (b.kind === "strategy") {
+        var s = b.s;
+        return [s.cards.map(function (c) { return c.rank; }).join(", ") + " (" + s.total + ") vs dealer " + BJ.upcardKey(s.up) + ". You chose " + ACTION_LABEL[s.did].toLowerCase() + ".",
+          "Basic strategy: " + S.CODE_NAMES[s.code].toLowerCase() + "."];
+      }
+      var x = b.hand;
+      if (b.kind === "noEdge") return ["Bet " + money(x.bet) + " at a true count of " + tcText(x.tc) + ".", "Bet the minimum, " + money(ses.min) + ". Below +1 the house still has the edge."];
+      if (b.kind === "missed") return ["Bet the minimum at a true count of " + tcText(x.tc) + ".", "Raise your bet, e.g. " + money(x.suggest) + ". At +2 and up the cards favor you."];
+      return ["Bet " + money(x.bet) + ", " + Math.round(x.bet / x.bankBefore * 100) + "% of the " + money(x.bankBefore) + " you had.", "Keep each bet to a small share of your money so a losing streak can't end your session."];
+    }
+    root.appendChild(h("section", { class: "math-sec" }, h("h3", { text: "Every blunder" }),
+      A.blunders.length ? h("div", { class: "chart-wrap" }, h("table", { class: "chart math-table blunders" },
+        h("thead", null, h("tr", null, ["Hand", "Type", "What happened", "Better play"].map(function (c) { return h("th", { scope: "col", text: c }); }))),
+        h("tbody", null, A.blunders.map(function (b) {
+          var d = describe(b);
+          return h("tr", null, h("td", { class: "num", text: String(b.n) }), h("td", { text: KIND[b.kind] }), h("td", { text: d[0] }), h("td", { text: d[1] }));
+        })))) : h("p", { text: "None. Clean session." })));
+
+    root.appendChild(h("details", { class: "math-sec" }, h("summary", { text: "Every hand: count, bet and result" }),
+      h("div", { class: "chart-wrap" }, h("table", { class: "chart math-table" },
+        h("thead", null, h("tr", null, ["Hand", "True count", "Your bet", "Suggested", "Result"].map(function (c) { return h("th", { scope: "col", text: c }); }))),
+        h("tbody", null, ses.hands.map(function (x) {
+          return h("tr", { class: x.flags.length ? "flagged" : null }, h("td", { class: "num", text: String(x.n) }), h("td", { class: "num", text: tcText(x.tc) }),
+            h("td", { class: "num", text: money(x.bet) }), h("td", { class: "num", text: money(x.suggest) }), h("td", { class: "num", text: moneyNet(x.net) + (x.outcome ? " (" + x.outcome + ")" : "") }));
+        }))))));
+
+    root.appendChild(h("section", { class: "math-sec small muted" }, h("h3", { text: "How blunders are judged" }),
+      h("ul", null,
+        h("li", null, "Edge by true count comes from a simulation posted on the ", link(SIM_SRC.edge, "Wizard of Vegas forum"),
+          " (six decks, 66% penetration): about −0.44% at 0, +0.06% at +1, +0.62% at +2, +0.99% at +3. That's why raising below +1 counts as a blunder and staying at the minimum at +2 or more does too. It's one user's simulation, not an official table."),
+        h("li", null, "Bet the minimum at a true count of 0 or below, and bet more as it rises: ", link(SIM_SRC.action, "Action Network"),
+          ". Bet increases should be proportional to your advantage (the Kelly idea): ", link(SIM_SRC.wiki, "Wikipedia, Card counting"), "."),
+        h("li", null, "Spread: Action Network suggests about 8 units on double deck and calls 16 units on six decks pushing it. ",
+          link(SIM_SRC.hilo, "Wizard of Odds"), " calls 1 to 15 about the most aggressive spread for six decks."),
+        h("li", { text: "This game's own rules, not published standards: the suggested bets (1 unit up to +1, then 2, 4, 6 and 8 units at +2, +3, +4, +5 and up) and the risky-bet line at 25% of your money." }),
+        h("li", { text: "Strategy blunders compare your play with the basic strategy chart for these rules. Count-based index plays aren't graded." }))));
+
+    root.appendChild(h("div", { class: "row" },
+      h("button", { class: "btn primary", type: "button", onclick: function () { self.start(); } }, "Play again"),
+      h("button", { class: "btn", type: "button", onclick: function () { self.session = null; self.phase = "setup"; self.render(); } }, "Change setup")));
   };
 
   /* =================================================================
@@ -665,7 +1030,8 @@
     drill: function (el) { return new Drill(el); },
     count: function (el) { return new TableGame(el, { countChecks: true, intro: countIntro, introBelow: true, title: "Count while playing" }); },
     table: function (el) { return new TableGame(el, { countChecks: true, others: 3, intro: tableIntro }); },
-    math: function (el) { return new window.BJMath.MathTab(el, { h: h, clear: clear, cardEl: cardEl, rules: rules }); }
+    math: function (el) { return new window.BJMath.MathTab(el, { h: h, clear: clear, cardEl: cardEl, rules: rules }); },
+    sim: function (el) { return new SimGame(el, { others: 3 }); }
   };
   var instances = {}, current = null, currentName = null;
   var holders = {};
