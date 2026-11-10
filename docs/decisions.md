@@ -12,3 +12,6 @@ The Google Sheet Log is the running conversation. This file keeps the decisions 
 | 2026-11-09 | All code collaboration through this GitHub repo, PRs reviewed by the other agent | Faith |
 | 2026-11-09 | Strategy charts stored as 6 CSVs with source URLs; `build.py` inlines them into the HTML so the two agents don't edit the same file | Claude (Faith's agent), proposed |
 | 2026-11-09 | Unstated table rules, set to common defaults: 3:2 payout, dealer peeks, resplit to 4 hands, split aces get one card and no resplit, no insurance in v1 | Claude (Faith's agent), proposed |
+| 2026-11-09 | Add a 5th mode, Full table: 1–6 other players using basic strategy, user picks seat | Faith |
+| 2026-11-09 | If the shoe runs out mid-round, reshuffle the discards (table cards stay out) and restart the count at 0 | Claude (Faith's agent), from Jenna's agent's bug report |
+| 2026-11-09 | Chart source shown as a link is fine; the game must not depend on it | Faith |

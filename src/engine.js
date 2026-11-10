@@ -63,7 +63,21 @@
   };
   Shoe.prototype.remaining = function () { return this.cards.length - this.pos; };
   Shoe.prototype.decksRemaining = function () { return this.remaining() / 52; };
-  Shoe.prototype.needsShuffle = function () { return this.pos >= this.total * this.penetration; };
+  // Due for a shuffle at the cut card, or when fewer than minCards are left for the next round.
+  Shoe.prototype.needsShuffle = function (minCards) {
+    return this.pos >= this.total * this.penetration || this.remaining() < (minCards || 0);
+  };
+  // Shoe ran out mid-round: shuffle everything except the cards still on the table.
+  Shoe.prototype.reshuffleExcept = function (onTable) {
+    if (this.fixed) throw new Error("Shoe is empty");
+    this.shuffle();
+    var keep = this.cards;
+    onTable.forEach(function (t) {
+      for (var i = 0; i < keep.length; i++)
+        if (keep[i].rank === t.rank && keep[i].suit === t.suit) { keep.splice(i, 1); return; }
+    });
+    this.total = keep.length;
+  };
 
   /* ---------- Hi-Lo counter ---------- */
 
@@ -134,13 +148,18 @@
 
   /* ---------- Round ---------- */
 
-  // One round of blackjack. Every card that becomes visible is reported to onExpose,
-  // so the app can keep the Hi-Lo count exactly as a player at the table would.
+  // One round of blackjack at a table with opts.seats seats (default 1). The user plays
+  // opts.userSeat; the app plays the other seats. Seats act in order, seat 0 first.
+  // Every card that becomes visible is reported to onExpose, so the app can keep the
+  // Hi-Lo count exactly as a player at the table would.
   function Round(shoe, rules, opts) {
     opts = opts || {};
     this.shoe = shoe;
     this.rules = rules;
+    this.seats = opts.seats || 1;
+    this.userSeat = opts.userSeat || 0;
     this.onExpose = opts.onExpose || function () {};
+    this.onReshuffle = opts.onReshuffle || function () {};
     this.hands = [];
     this.active = 0;
     this.dealer = new Hand();
@@ -148,44 +167,62 @@
     this.phase = "init"; // init -> player -> dealer -> done
     this.results = null;
   }
+  Round.prototype._tableCards = function () {
+    var all = this.dealer.cards.slice();
+    this.hands.forEach(function (h) { all = all.concat(h.cards); });
+    return all;
+  };
   Round.prototype._deal = function (hand, faceUp) {
+    if (this.shoe.remaining() === 0) {
+      this.shoe.reshuffleExcept(this._tableCards());
+      this.onReshuffle();
+    }
     var c = this.shoe.draw();
     hand.add(c);
     if (faceUp) this.onExpose(c);
     return c;
   };
   Round.prototype.start = function (bet) {
-    var p = new Hand([], { bet: bet || 1 });
-    this.hands = [p];
-    this._deal(p, true);
+    var self = this, i;
+    this.hands = [];
+    for (i = 0; i < this.seats; i++) {
+      var hd = new Hand([], { bet: bet || 1 }); hd.seat = i; this.hands.push(hd);
+    }
+    this.hands.forEach(function (h) { self._deal(h, true); });
     this._deal(this.dealer, true);   // upcard
-    this._deal(p, true);
+    this.hands.forEach(function (h) { self._deal(h, true); });
     this._deal(this.dealer, false);  // hole card
     this.phase = "player";
 
     var up = this.dealer.cards[0];
-    var dealerBJ = this.dealer.isBlackjack();
     // Dealer peeks when showing an ace or ten-value card. A dealer blackjack ends the round.
-    if (this.rules.peek && (up.rank === "A" || cardValue(up) === 10) && dealerBJ) return this._finish();
-    if (p.isBlackjack()) return this._finish();
+    if (this.rules.peek && (up.rank === "A" || cardValue(up) === 10) && this.dealer.isBlackjack()) return this._finish();
     this._advance();
     return this;
   };
   Round.prototype.current = function () {
     return this.phase === "player" ? this.hands[this.active] : null;
   };
-  // Which actions the player may take right now.
+  Round.prototype.isUserTurn = function () {
+    var h = this.current();
+    return !!h && h.seat === this.userSeat;
+  };
+  Round.prototype.seatHands = function (seat) {
+    return this.hands.filter(function (h) { return h.seat === seat; });
+  };
+  // Which actions the current hand may take right now.
   Round.prototype.available = function () {
     var h = this.current();
     if (!h) return {};
     var two = h.cards.length === 2;
+    var handsInSeat = this.seatHands(h.seat).length;
     return {
       hit: true,
       stand: true,
       double: two && !h.splitAces && (!h.fromSplit || this.rules.das),
-      split: two && h.isPair() && this.hands.length < this.rules.maxHands &&
+      split: two && h.isPair() && handsInSeat < this.rules.maxHands &&
         !(h.cards[0].rank === "A" && h.fromSplit && !this.rules.resplitAces),
-      surrender: two && this.rules.surrender && this.hands.length === 1 && !h.fromSplit
+      surrender: two && this.rules.surrender && handsInSeat === 1 && !h.fromSplit
     };
   };
   Round.prototype.act = function (action) {
@@ -204,6 +241,7 @@
       var aces = h.cards[0].rank === "A";
       var a = new Hand([h.cards[0]], { bet: h.bet, fromSplit: true, splitAces: aces });
       var b = new Hand([h.cards[1]], { bet: h.bet, fromSplit: true, splitAces: aces });
+      a.seat = b.seat = h.seat;
       this.hands.splice(this.active, 1, a, b);
       this._deal(a, true);
     }
@@ -226,7 +264,8 @@
   Round.prototype._dealerPlay = function () {
     this.phase = "dealer";
     this._revealHole();
-    var live = this.hands.some(function (h) { return !h.isBust() && !h.surrendered; });
+    // The dealer only draws if some hand is still waiting on the dealer's total.
+    var live = this.hands.some(function (h) { return !h.isBust() && !h.surrendered && !h.isBlackjack(); });
     if (live) {
       for (;;) {
         var s = this.dealer.score();
@@ -250,12 +289,14 @@
       else if (dt > 21 || h.total() > dt) { o = "win"; net = h.bet; }
       else if (h.total() === dt) { o = "push"; net = 0; }
       else { o = "lose"; net = -h.bet; }
-      return { outcome: o, net: net };
+      return { outcome: o, net: net, seat: h.seat };
     });
     return this;
   };
-  Round.prototype.net = function () {
-    return (this.results || []).reduce(function (s, r) { return s + r.net; }, 0);
+  // Net result for one seat (default: the user's seat).
+  Round.prototype.net = function (seat) {
+    if (seat == null) seat = this.userSeat;
+    return (this.results || []).reduce(function (s, r) { return s + (r.seat === seat ? r.net : 0); }, 0);
   };
 
   var api = {
