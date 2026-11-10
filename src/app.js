@@ -296,7 +296,9 @@
   };
   TableGame.prototype.render = function () {
     var self = this, rd = this.round, root = clear(this.root), o = this.opts;
-    root.appendChild(o.intro());
+    // introBelow: game first, instructions after (Faith asked for this in Count while playing).
+    if (!o.introBelow) root.appendChild(o.intro());
+    else root.appendChild(h("h2", { class: "drill-title", text: o.title }));
     var inRound = rd && rd.phase === "player";
     var playing = inRound && rd.isUserTurn();
     var ok = playing ? rd.available() : {};
@@ -365,6 +367,13 @@
     if (o.coach && st.moves) stats.appendChild(h("span", null, "Strategy moves ", h("b", { class: "num", text: st.movesRight + "/" + st.moves })));
     if (o.countChecks) stats.appendChild(h("span", null, "Count checks ", h("b", { class: "num", text: st.checksRight + "/" + st.checks })));
     root.appendChild(stats);
+    if (o.introBelow) {
+      var help = o.intro();
+      help.classList.add("drill-help");
+      var h2 = help.querySelector("h2");
+      if (h2) h2.replaceWith(h("h3", { text: "How this mode works" }));
+      root.appendChild(help);
+    }
   };
   TableGame.prototype.renderCoach = function () {
     var m = this.coachMsg, r = rules();
@@ -642,7 +651,7 @@
     learn: function (el) { return new TableGame(el, { coach: true, intro: learnIntro }); },
     quiz: function (el) { return new Quiz(el); },
     drill: function (el) { return new Drill(el); },
-    count: function (el) { return new TableGame(el, { countChecks: true, intro: countIntro }); },
+    count: function (el) { return new TableGame(el, { countChecks: true, intro: countIntro, introBelow: true, title: "Count while playing" }); },
     table: function (el) { return new TableGame(el, { countChecks: true, others: 3, intro: tableIntro }); },
     math: function (el) { return new window.BJMath.MathTab(el, { h: h, clear: clear, cardEl: cardEl, rules: rules }); }
   };
