@@ -637,7 +637,8 @@
     quiz: function (el) { return new Quiz(el); },
     drill: function (el) { return new Drill(el); },
     count: function (el) { return new TableGame(el, { countChecks: true, intro: countIntro }); },
-    table: function (el) { return new TableGame(el, { countChecks: true, others: 3, intro: tableIntro }); }
+    table: function (el) { return new TableGame(el, { countChecks: true, others: 3, intro: tableIntro }); },
+    math: function (el) { return new window.BJMath.MathTab(el, { h: h, clear: clear, cardEl: cardEl, rules: rules }); }
   };
   var instances = {}, current = null, currentName = null;
   var holders = {};
