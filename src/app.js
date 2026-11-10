@@ -52,6 +52,18 @@
   function pick(arr) { return arr[rand(arr.length)]; }
   function fmt(n) { var r = Math.round(n * 10) / 10 || 0; return (r > 0 ? "+" : "") + r; } // || 0 turns -0 into 0
   function signed(n) { return (n > 0 ? "+" : "") + n; }
+  /* True count grading (Faith, Nov 10): show the answer to one decimal, and count an answer right
+   * when it rounds to the same whole number as that one-decimal answer. Rounding the shown value
+   * (not the raw one) keeps grading consistent with what's on screen, e.g. 1.46 shows as 1.5 → 2.
+   * Halves round away from zero (1.5 → 2, −1.5 → −2). */
+  function tenth(x) { return Math.round(x * 10) / 10 || 0; }
+  function wholeTC(x) { var r = Math.sign(x) * Math.round(Math.abs(tenth(x))); return r || 0; }
+  function tcRight(userVal, exact) { return wholeTC(userVal) === wholeTC(exact); }
+  // "+1.7, which rounds to +2" (or just "+2" when the tenth is already whole).
+  function tcText(exact) {
+    var t = tenth(exact), w = wholeTC(exact);
+    return t === w ? signed(w) : fmt(t) + ", which rounds to " + signed(w);
+  }
   function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 
   function cardEl(card, opts) {
@@ -283,7 +295,7 @@
   TableGame.prototype.submitCheck = function (rcVal, tcVal) {
     var rc = this.counter.running, tc = this.counter.trueCount(this.shoe);
     var rcOk = rcVal === rc;
-    var tcOk = Math.abs(tcVal - tc) <= 0.5 + 1e-9;
+    var tcOk = tcRight(tcVal, tc);
     this.stats.checks++; if (rcOk && tcOk) this.stats.checksRight++;
     this.lastCheck = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal,
       decksLeft: this.shoe.decksRemaining() };
@@ -419,7 +431,7 @@
         h("p", null, "Running count: ", h("span", { class: L.rcOk ? "right" : "wrong", text: L.rcOk ? "right" : "you said " + signed(L.rcVal) }),
           ". It was ", h("span", { class: "hl num", text: signed(L.rc) }), "."),
         h("p", null, "True count: ", h("span", { class: L.tcOk ? "right" : "wrong", text: L.tcOk ? "right" : "you said " + fmt(L.tcVal) }),
-          ". It was ", h("span", { class: "hl num", text: fmt(L.tc) }),
+          ". It was ", h("span", { class: "hl num", text: tcText(L.tc) }),
           " (" + signed(L.rc) + " ÷ " + (Math.round(L.decksLeft * 100) / 100) + " decks left).")));
     } else {
       side.appendChild(h("p", { class: "small muted", text: "Keep a running count in your head as cards appear. The game stops to check it after the hand." }));
@@ -563,7 +575,7 @@
   Drill.prototype.submit = function (rcVal, tcVal) {
     var rc = this.counter.running, tc = this.counter.trueCount(this.shoe);
     var rcOk = rcVal === rc;
-    var tcOk = !this.askTrue || this.done || Math.abs(tcVal - tc) <= 0.5 + 1e-9;
+    var tcOk = !this.askTrue || this.done || tcRight(tcVal, tc);
     this.stats.n++; if (rcOk && tcOk) this.stats.right++;
     this.result = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal, final: this.done, left: this.shoe.decksRemaining() };
     this.pending = false;
@@ -609,7 +621,7 @@
         h("p", null, R.rcOk ? h("span", { class: "right", text: "Right. " }) : h("span", { class: "wrong", text: "You said " + signed(R.rcVal) + ". " }),
           "The running count is ", h("span", { class: "hl num", text: signed(R.rc) }), "."),
         this.askTrue && !R.final ? h("p", null, R.tcOk ? h("span", { class: "right", text: "True count right. " }) : h("span", { class: "wrong", text: "True count: you said " + fmt(R.tcVal) + ". " }),
-          "It's ", h("span", { class: "hl num", text: fmt(R.tc) }), " (" + signed(R.rc) + " ÷ " + (Math.round(R.left * 100) / 100) + " decks left).") : null,
+          "It's ", h("span", { class: "hl num", text: tcText(R.tc) }), " (" + signed(R.rc) + " ÷ " + (Math.round(R.left * 100) / 100) + " decks left).") : null,
         R.final ? h("button", { class: "btn primary", onclick: function () { self.reset(); } }, "Shuffle and start again") : null));
     }
     root.appendChild(stage);
