@@ -34,7 +34,7 @@ build.py                 combines src/ + data/ into blackjack-trainer.html
 src/                     game code (HTML template, CSS, JavaScript)
 data/strategy/           6 basic strategy charts, one CSV per rule set, each with its source
 data/text/               beginner explanation text
-tests/                   automated checks (run: node --test tests/)
+tests/                   automated checks (run: node --test tests/*.test.js)
 docs/decisions.md        decisions log (mirrors the Google Sheet Log)
 docs/test-plan.md        manual test checklist: 6 rule sets x 4 modes
 ```
