@@ -186,3 +186,5 @@ table.chart td.hit { outline: 3px solid var(--ink); background: var(--hl); color
 .lab-cards .card { width: 44px; height: 62px; }
 .lab-cards .card .r { font-size: 0.95rem; }
 .lab-cards .card .s { font-size: 1.2rem; bottom: 4px; right: 5px; }
+.hint-neg { margin: 4px 0 0; }
+@media (hover: hover) { .hint-neg { display: none; } } /* only phones/tablets need the ± tip */

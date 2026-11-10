@@ -77,15 +77,18 @@
     return /^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(t) ? parseFloat(t) : NaN;
   }
   // -> {el, input}. The ± button flips the sign, for phone keyboards without a minus key.
-  function countField(id, labelText) {
+  // decimals: true for the true count. inputmode opens the phone's number pad (numeric = digits,
+  // decimal = digits and a decimal point). Those pads have no minus key, hence the ± button.
+  function countField(id, labelText, decimals) {
     var input = h("input", { class: "ans num", type: "text", id: id, autocomplete: "off", autocapitalize: "off",
-      spellcheck: "false", placeholder: "e.g. -3" });
+      spellcheck: "false", placeholder: "e.g. -3", inputmode: decimals ? "decimal" : "numeric" });
     var flip = h("button", { type: "button", class: "btn", "aria-label": "Flip the sign of " + labelText, onclick: function () {
       var v = input.value.trim();
       input.value = v.charAt(0) === "-" ? v.slice(1) : "-" + v.replace(/^\+/, "");
       input.focus();
     } }, "±");
-    return { input: input, el: [h("label", { for: id, text: labelText }), h("div", { class: "row" }, input, flip)] };
+    return { input: input, el: [h("label", { for: id, text: labelText }), h("div", { class: "row" }, flip, input),
+      h("p", { class: "small muted hint-neg", text: "Negative? Tap ± to add or remove the minus sign." })] };
   }
   // Wires a count form: checks every field parses before calling done(values...).
   function countForm(fields, done, extraTop) {
@@ -395,7 +398,7 @@
 
     if (this.pendingCheck) {
       side.appendChild(countForm([countField("rc", "Running count"),
-        countField("tc", "True count (running ÷ decks left, nearest whole number)")],
+        countField("tc", "True count (running ÷ decks left, nearest whole number)", true)],
         function (rcv, tcv) { self.submitCheck(rcv, tcv); }));
     } else if (this.lastCheck) {
       var L = this.lastCheck;
@@ -592,7 +595,7 @@
     if (this.pending) {
       var fields = [countField("drc", "Running count")];
       if (this.askTrue && !this.done)
-        fields.push(countField("dtc", "True count (" + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " decks left, nearest whole number)"));
+        fields.push(countField("dtc", "True count (" + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " decks left, nearest whole number)", true));
       stage.appendChild(countForm(fields, function (rcv, tcv) { self.submit(rcv, tcv); },
         h("p", null, h("b", { text: this.done ? "That's the whole shoe. What's your final running count?" : "Stop. What's the running count?" }))));
     } else if (this.result) {
