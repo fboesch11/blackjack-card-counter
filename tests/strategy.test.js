@@ -100,3 +100,27 @@ test("missed cards: mean and SD from the pmf equal the closed forms", () => {
   const full = M.countShiftDist(20, 12, 20, 52);
   assert.equal(full.mode, 0); assert.ok(Math.abs(full.pmf[0] - 1) < 1e-12);
 });
+
+test("bots: close-call mistakes only on close calls, and only to allowed plays", () => {
+  const rules6 = BJ.makeRules({ decks: 6, h17: false });
+  const chart = { "6deck_s17": { meta: {}, table: {
+    H16: row("Rh"), H12: row("H"), H13: row("S"), H8: row("H"), H11: row("D"), H19: row("S"),
+    S18: row("Ds"), P8: row("P"), PA: row("P"), P6: row("P"), H17: row("S") } } };
+  const all = { hit: true, stand: true, double: true, split: true, surrender: true };
+  const mk = (cards, up, allowed = all) => {
+    const hd = hand(cards), rec = S.recommend(chart, rules6, hd, c(up), { ...allowed, split: allowed.split && hd.isPair() });
+    return S.closeCallMistake(rec, hd, c(up), { ...allowed, split: allowed.split && hd.isPair() });
+  };
+  assert.equal(mk("10 6", "10"), "hit");        // surrender -> play it out
+  assert.equal(mk("10 2", "9"), "stand");       // hit 12 -> stand
+  assert.equal(mk("10 3", "4"), "hit");         // stand 13 -> hit
+  assert.equal(mk("6 5", "6"), "hit");          // double 11 -> just hit
+  assert.equal(mk("A 7", "4"), "stand");        // Ds soft 18 -> stand
+  assert.equal(mk("6 6", "4"), "stand");        // split 6s vs 4 -> stand on 12
+  assert.equal(mk("8 8", "4"), null);           // always split 8s
+  assert.equal(mk("A A", "4"), null);           // always split aces
+  assert.equal(mk("5 3", "4"), null);           // hit 8: obvious
+  assert.equal(mk("10 9", "4"), null);          // stand 19: obvious
+  assert.equal(mk("10 7", "4"), null);          // stand hard 17: obvious
+  assert.equal(mk("10 2", "9", { ...all, stand: false }), null); // alternative not allowed
+});

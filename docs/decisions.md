@@ -18,3 +18,5 @@ The Google Sheet Log is the running conversation. This file keeps the decisions 
 | 2026-11-10 | True count feedback shows one decimal; an answer is right if it rounds to the same whole number | Faith |
 | 2026-11-10 | New tab 'Bet the count': bankroll session vs bots, no in-game hints, blunder summary at the end; The math stays the last tab | Faith |
 | 2026-11-10 | Betting blunders: raising below TC +1, staying at the minimum at TC +2 or more, betting over 25% of bankroll (25% and the suggested ramp are this game's own rules) | Claude (Faith's agent), proposed |
+| 2026-11-10 | Other players sometimes get a close call wrong (each bot 5–30% of close calls; never obvious hands) | Faith |
+| 2026-11-10 | Rename Full table to Full table practice; every tab except Learn to play shows the game first and instructions below | Faith |
