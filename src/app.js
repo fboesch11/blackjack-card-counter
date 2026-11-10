@@ -521,7 +521,7 @@
   /* =================================================================
    * Count drill: flip through the shoe, stop at random points to check the running count
    * ================================================================= */
-  function Drill(root) { this.tutOpen = store("bj.tutSeen") !== "1"; this.root = root; this.speed = 0; this.perFlip = 1; this.askTrue = false; this.stats = { n: 0, right: 0 }; this.reset(); }
+  function Drill(root) { this.root = root; this.speed = 0; this.perFlip = 1; this.askTrue = false; this.stats = { n: 0, right: 0 }; this.reset(); }
   Drill.prototype.reset = function (note) {
     this.stop();
     this.shoe = new BJ.Shoe(rules().decks, { penetration: 1 });
@@ -566,16 +566,8 @@
   };
   Drill.prototype.render = function (fresh) {
     var self = this, root = clear(this.root);
-    root.appendChild(h("div", { class: "intro" },
-      h("h2", { text: "Count drill" }),
-      h("p", { class: "values", text: "+1 for 2–6.  0 for 7–9.  −1 for 10, J, Q, K, A." }),
-      // Full tutorial is open the first time, then folds away so the cards sit higher on a phone.
-      h("details", { class: "tutorial", open: this.tutOpen ? "open" : null,
-        ontoggle: function (e) { self.tutOpen = e.target.open; store("bj.tutSeen", "1"); } },
-        h("summary", { text: "How Hi-Lo counting works" }),
-        paras(TEXT.hilo_tutorial, [
-          "Hi-Lo gives every card a value: 2 through 6 count +1, 7 through 9 count 0, and tens, faces and aces count −1. Add them up as the cards go by. That total is the running count.",
-          "A plus count means more high cards are left in the shoe than low ones. A full shoe always adds up to exactly 0, so if you counted every card right you'll end at 0."]))));
+    // Faith: the drill goes first, the instructions below it.
+    root.appendChild(h("h2", { class: "drill-title", text: "Count drill" }));
     if (this.note) root.appendChild(h("p", { class: "muted small", text: this.note }));
 
     var speed = h("select", { "aria-label": "Flip speed", onchange: function (e) { self.speed = parseInt(e.target.value, 10); self.play(); } },
@@ -584,8 +576,8 @@
     var per = h("select", { "aria-label": "Cards per flip", onchange: function (e) { self.perFlip = parseInt(e.target.value, 10); } },
       [1, 2].map(function (n) { return h("option", { value: n, selected: n === self.perFlip ? "selected" : null }, n + (n === 1 ? " card" : " cards") + " at a time"); }));
     var tcBox = h("input", { type: "checkbox", id: "asktc", checked: this.askTrue ? "checked" : null, onchange: function (e) { self.askTrue = e.target.checked; } });
-    root.appendChild(h("div", { class: "row small", style: "margin-bottom:16px" }, speed, per,
-      h("label", null, tcBox, " Also ask the true count")));
+    var controls = h("div", { class: "row small drill-controls" }, speed, per,
+      h("label", null, tcBox, " Also ask the true count"));
 
     var stage = h("div", { class: "panel" });
     var cards = h("div", { class: "drill-cards" }, this.showing.length ? this.showing.map(function (c) { return cardEl(c, { big: true, fresh: fresh }); }) : cardEl(null, { big: true }));
@@ -612,7 +604,14 @@
         R.final ? h("button", { class: "btn primary", onclick: function () { self.reset(); } }, "Shuffle and start again") : null));
     }
     root.appendChild(stage);
+    root.appendChild(controls);
     root.appendChild(h("p", { class: "stats" }, h("span", null, "Checks right ", h("b", { class: "num", text: this.stats.right + "/" + this.stats.n }))));
+    root.appendChild(h("section", { class: "intro drill-help", "aria-label": "How to count" },
+      h("h3", { text: "How Hi-Lo counting works" }),
+      h("p", { class: "values", text: "+1 for 2–6.  0 for 7–9.  −1 for 10, J, Q, K, A." }),
+      paras(TEXT.hilo_tutorial, [
+        "Hi-Lo gives every card a value: 2 through 6 count +1, 7 through 9 count 0, and tens, faces and aces count −1. Add them up as the cards go by. That total is the running count.",
+        "A plus count means more high cards are left in the shoe than low ones. A full shoe always adds up to exactly 0, so if you counted every card right you'll end at 0."])));
   };
 
   /* =================================================================
