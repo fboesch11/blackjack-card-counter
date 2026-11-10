@@ -39,7 +39,7 @@
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
   function rand(n) { return Math.floor(Math.random() * n); }
   function pick(arr) { return arr[rand(arr.length)]; }
-  function fmt(n) { return (n > 0 ? "+" : "") + (Math.round(n * 10) / 10); }
+  function fmt(n) { var r = Math.round(n * 10) / 10 || 0; return (r > 0 ? "+" : "") + r; } // || 0 turns -0 into 0
   function signed(n) { return (n > 0 ? "+" : "") + n; }
   function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
 
@@ -58,6 +58,49 @@
     if (s.total > 21) return s.total + ", bust";
     return (s.soft && s.total < 21 ? "soft " : "") + s.total;
   }
+  /* ---------- Count answer fields ----------
+   * Plain text fields, not type=number: number fields block "+2", reject decimals that
+   * don't fit their step, and phone number pads often have no minus key. */
+  function parseCount(str) {
+    var t = String(str == null ? "" : str).trim().replace(/[\u2212\u2013]/g, "-").replace(/\s+/g, "");
+    return /^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(t) ? parseFloat(t) : NaN;
+  }
+  // -> {el, input}. The ± button flips the sign, for phone keyboards without a minus key.
+  function countField(id, labelText) {
+    var input = h("input", { class: "ans num", type: "text", id: id, autocomplete: "off", autocapitalize: "off",
+      spellcheck: "false", placeholder: "e.g. -3" });
+    var flip = h("button", { type: "button", class: "btn", "aria-label": "Flip the sign of " + labelText, onclick: function () {
+      var v = input.value.trim();
+      input.value = v.charAt(0) === "-" ? v.slice(1) : "-" + v.replace(/^\+/, "");
+      input.focus();
+    } }, "±");
+    return { input: input, el: [h("label", { for: id, text: labelText }), h("div", { class: "row" }, input, flip)] };
+  }
+  // Wires a count form: checks every field parses before calling done(values...).
+  function countForm(fields, done, extraTop) {
+    var err = h("p", { class: "wrong small", role: "alert" });
+    var form = h("form", { class: "check", novalidate: "novalidate", onsubmit: function (e) {
+      e.preventDefault();
+      for (var i = 0; i < fields.length; i++) {
+        if (isNaN(parseCount(fields[i].input.value))) {
+          err.textContent = "Enter a number for " + fields[i].input.labels[0].textContent.split(" (")[0].toLowerCase() + ", like 3, -2 or +1.";
+          fields[i].input.focus();
+          return;
+        }
+      }
+      done.apply(null, fields.map(function (f) { return parseCount(f.input.value); }));
+    } }, extraTop || null);
+    fields.forEach(function (f) { f.el.forEach(function (x) { form.appendChild(x); }); });
+    form.appendChild(err);
+    form.appendChild(h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn primary", type: "submit" }, "Check")));
+    setTimeout(function () {
+      // On a phone the form can sit below the table; bring it into view before asking.
+      if (window.innerWidth < 760 && form.scrollIntoView) form.scrollIntoView({ block: "center", behavior: "smooth" });
+      fields[0].input.focus({ preventScroll: window.innerWidth < 760 });
+    }, 0);
+    return form;
+  }
+
   // Paragraphs from data/text/explanations.json when present, else the built-in defaults.
   function paras(list, fallback) {
     var src = Array.isArray(list) && list.length ? list : fallback;
@@ -215,9 +258,8 @@
   };
   TableGame.prototype.submitCheck = function (rcVal, tcVal) {
     var rc = this.counter.running, tc = this.counter.trueCount(this.shoe);
-    var rcOk = parseInt(rcVal, 10) === rc;
-    var tcNum = parseFloat(tcVal);
-    var tcOk = !isNaN(tcNum) && Math.abs(tcNum - tc) <= 0.5 + 1e-9;
+    var rcOk = rcVal === rc;
+    var tcOk = Math.abs(tcVal - tc) <= 0.5 + 1e-9;
     this.stats.checks++; if (rcOk && tcOk) this.stats.checksRight++;
     this.lastCheck = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal,
       decksLeft: this.shoe.decksRemaining() };
@@ -335,20 +377,15 @@
     side.appendChild(h("p", { class: "small" }, "Check my count ", every));
 
     if (this.pendingCheck) {
-      var rc = h("input", { class: "ans num", type: "number", step: "1", id: "rc", inputmode: "numeric", required: "required" });
-      var tc = h("input", { class: "ans num", type: "number", step: "0.5", id: "tc", inputmode: "decimal", required: "required" });
-      var f = h("form", { class: "check", onsubmit: function (e) { e.preventDefault(); self.submitCheck(rc.value, tc.value); } },
-        h("label", { for: "rc", text: "Running count" }), rc,
-        h("label", { for: "tc", text: "True count (running ÷ decks left, nearest whole number)" }), tc,
-        h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn primary", type: "submit" }, "Check")));
-      side.appendChild(f);
-      setTimeout(function () { rc.focus(); }, 0);
+      side.appendChild(countForm([countField("rc", "Running count"),
+        countField("tc", "True count (running ÷ decks left, nearest whole number)")],
+        function (rcv, tcv) { self.submitCheck(rcv, tcv); }));
     } else if (this.lastCheck) {
       var L = this.lastCheck;
       side.appendChild(h("div", { class: "small", "aria-live": "polite" },
-        h("p", null, "Running count: ", h("span", { class: L.rcOk ? "right" : "wrong", text: L.rcOk ? "right" : "you said " + L.rcVal }),
+        h("p", null, "Running count: ", h("span", { class: L.rcOk ? "right" : "wrong", text: L.rcOk ? "right" : "you said " + signed(L.rcVal) }),
           ". It was ", h("span", { class: "hl num", text: signed(L.rc) }), "."),
-        h("p", null, "True count: ", h("span", { class: L.tcOk ? "right" : "wrong", text: L.tcOk ? "right" : "you said " + L.tcVal }),
+        h("p", null, "True count: ", h("span", { class: L.tcOk ? "right" : "wrong", text: L.tcOk ? "right" : "you said " + fmt(L.tcVal) }),
           ". It was ", h("span", { class: "hl num", text: fmt(L.tc) }),
           " (" + signed(L.rc) + " ÷ " + (Math.round(L.decksLeft * 100) / 100) + " decks left).")));
     } else {
@@ -460,7 +497,7 @@
   /* =================================================================
    * Count drill: flip through the shoe, stop at random points to check the running count
    * ================================================================= */
-  function Drill(root) { this.root = root; this.speed = 0; this.perFlip = 1; this.askTrue = false; this.stats = { n: 0, right: 0 }; this.reset(); }
+  function Drill(root) { this.tutOpen = store("bj.tutSeen") !== "1"; this.root = root; this.speed = 0; this.perFlip = 1; this.askTrue = false; this.stats = { n: 0, right: 0 }; this.reset(); }
   Drill.prototype.reset = function (note) {
     this.stop();
     this.shoe = new BJ.Shoe(rules().decks, { penetration: 1 });
@@ -492,8 +529,8 @@
   };
   Drill.prototype.submit = function (rcVal, tcVal) {
     var rc = this.counter.running, tc = this.counter.trueCount(this.shoe);
-    var rcOk = parseInt(rcVal, 10) === rc;
-    var tcOk = !this.askTrue || this.done || Math.abs(parseFloat(tcVal) - tc) <= 0.5 + 1e-9;
+    var rcOk = rcVal === rc;
+    var tcOk = !this.askTrue || this.done || Math.abs(tcVal - tc) <= 0.5 + 1e-9;
     this.stats.n++; if (rcOk && tcOk) this.stats.right++;
     this.result = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal, final: this.done, left: this.shoe.decksRemaining() };
     this.pending = false;
@@ -507,9 +544,14 @@
     var self = this, root = clear(this.root);
     root.appendChild(h("div", { class: "intro" },
       h("h2", { text: "Count drill" }),
-      paras(TEXT.hilo_tutorial, [
-        "Hi-Lo gives every card a value: 2 through 6 count +1, 7 through 9 count 0, and tens, faces and aces count −1. Add them up as the cards go by. That total is the running count.",
-        "A plus count means more high cards are left in the shoe than low ones. A full shoe always adds up to exactly 0, so if you counted every card right you'll end at 0."])));
+      h("p", { class: "values", text: "+1 for 2–6.  0 for 7–9.  −1 for 10, J, Q, K, A." }),
+      // Full tutorial is open the first time, then folds away so the cards sit higher on a phone.
+      h("details", { class: "tutorial", open: this.tutOpen ? "open" : null,
+        ontoggle: function (e) { self.tutOpen = e.target.open; store("bj.tutSeen", "1"); } },
+        h("summary", { text: "How Hi-Lo counting works" }),
+        paras(TEXT.hilo_tutorial, [
+          "Hi-Lo gives every card a value: 2 through 6 count +1, 7 through 9 count 0, and tens, faces and aces count −1. Add them up as the cards go by. That total is the running count.",
+          "A plus count means more high cards are left in the shoe than low ones. A full shoe always adds up to exactly 0, so if you counted every card right you'll end at 0."]))));
     if (this.note) root.appendChild(h("p", { class: "muted small", text: this.note }));
 
     var speed = h("select", { "aria-label": "Flip speed", onchange: function (e) { self.speed = parseInt(e.target.value, 10); self.play(); } },
@@ -531,20 +573,17 @@
     stage.appendChild(h("div", { class: "drill-stage" }, cards, side));
 
     if (this.pending) {
-      var rc = h("input", { class: "ans num", type: "number", step: "1", id: "drc", inputmode: "numeric", required: "required" });
-      var tc = this.askTrue && !this.done ? h("input", { class: "ans num", type: "number", step: "0.5", id: "dtc", inputmode: "decimal", required: "required" }) : null;
-      stage.appendChild(h("form", { class: "check", onsubmit: function (e) { e.preventDefault(); self.submit(rc.value, tc ? tc.value : ""); } },
-        h("p", null, h("b", { text: this.done ? "That's the whole shoe. What's your final running count?" : "Stop. What's the running count?" })),
-        h("label", { for: "drc", text: "Running count" }), rc,
-        tc ? h("label", { for: "dtc", text: "True count (" + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " decks left, nearest whole number)" }) : null, tc,
-        h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn primary", type: "submit" }, "Check"))));
-      setTimeout(function () { rc.focus(); }, 0);
+      var fields = [countField("drc", "Running count")];
+      if (this.askTrue && !this.done)
+        fields.push(countField("dtc", "True count (" + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " decks left, nearest whole number)"));
+      stage.appendChild(countForm(fields, function (rcv, tcv) { self.submit(rcv, tcv); },
+        h("p", null, h("b", { text: this.done ? "That's the whole shoe. What's your final running count?" : "Stop. What's the running count?" }))));
     } else if (this.result) {
       var R = this.result;
       stage.appendChild(h("div", { class: "feedback", "aria-live": "polite" },
-        h("p", null, R.rcOk ? h("span", { class: "right", text: "Right. " }) : h("span", { class: "wrong", text: "You said " + R.rcVal + ". " }),
+        h("p", null, R.rcOk ? h("span", { class: "right", text: "Right. " }) : h("span", { class: "wrong", text: "You said " + signed(R.rcVal) + ". " }),
           "The running count is ", h("span", { class: "hl num", text: signed(R.rc) }), "."),
-        this.askTrue && !R.final ? h("p", null, R.tcOk ? h("span", { class: "right", text: "True count right. " }) : h("span", { class: "wrong", text: "True count: you said " + R.tcVal + ". " }),
+        this.askTrue && !R.final ? h("p", null, R.tcOk ? h("span", { class: "right", text: "True count right. " }) : h("span", { class: "wrong", text: "True count: you said " + fmt(R.tcVal) + ". " }),
           "It's ", h("span", { class: "hl num", text: fmt(R.tc) }), " (" + signed(R.rc) + " ÷ " + (Math.round(R.left * 100) / 100) + " decks left).") : null,
         R.final ? h("button", { class: "btn primary", onclick: function () { self.reset(); } }, "Shuffle and start again") : null));
     }

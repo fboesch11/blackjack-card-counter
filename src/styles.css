@@ -33,6 +33,12 @@ body {
   background-size: 24px 24px;
 }
 button, input, select { font: inherit; color: inherit; }
+/* iPhone: 16px+ form text stops Safari zooming in on focus; manipulation removes the double-tap-zoom delay. */
+input, select { font-size: 16px; }
+input[type="checkbox"] { width: 22px; height: 22px; vertical-align: middle; margin: 0 6px 0 0; }
+label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center; min-height: 44px; }
+button, select, .seg span { touch-action: manipulation; }
+select { min-height: 44px; padding: 6px 8px; border: 1.5px solid var(--ink); border-radius: 8px; background: var(--card); color: #1c2b45; }
 :focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
 .num { font-variant-numeric: tabular-nums; }
 
@@ -46,7 +52,7 @@ button, input, select { font: inherit; color: inherit; }
 .seg label { display: inline-block; }
 .seg input { position: absolute; opacity: 0; pointer-events: none; }
 .seg span {
-  display: inline-block; min-width: 44px; padding: 6px 12px; text-align: center; cursor: pointer;
+  display: inline-block; min-width: 44px; min-height: 44px; padding: 10px 12px; text-align: center; cursor: pointer; line-height: 22px;
   border: 1.5px solid var(--ink); margin-right: -1.5px; background: var(--panel);
 }
 .seg label:first-of-type span { border-radius: 8px 0 0 8px; }
@@ -57,25 +63,34 @@ button, input, select { font: inherit; color: inherit; }
 
 .modes { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 2px solid var(--ink); }
 .modes button {
-  background: none; border: 0; padding: 10px 14px; cursor: pointer; white-space: nowrap;
+  background: none; border: 0; padding: 10px 14px; min-height: 44px; cursor: pointer; white-space: nowrap;
   border-radius: 8px 8px 0 0; color: var(--ink-soft);
 }
 .modes button[aria-selected="true"] { background: var(--ink); color: var(--paper); }
 
-main { max-width: 980px; margin: 0 auto; padding: 20px 16px 40px; }
+main { max-width: 980px; margin: 0 auto; padding: 20px max(16px, env(safe-area-inset-right)) 40px max(16px, env(safe-area-inset-left)); }
 .foot { max-width: 980px; margin: 0 auto; padding: 0 16px 32px; font-size: 0.8rem; color: var(--ink-soft); }
 
 /* ---------- Shared pieces ---------- */
 .intro { max-width: 66ch; margin: 0 0 20px; }
 .intro h2 { font: 700 1.4rem/1.2 var(--serif); margin: 0 0 6px; }
 .intro p { margin: 0 0 8px; }
+a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.values { font: 700 1.1rem/1.4 var(--serif); white-space: pre-wrap; }
+details.tutorial { margin: 4px 0 8px; }
+details.tutorial summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+details.tutorial summary::before { content: "▸"; display: inline-block; width: 1.1em; transition: transform 0.15s; }
+details.tutorial[open] summary::before { transform: rotate(90deg); }
+details.tutorial[open] summary { margin-bottom: 4px; }
+@media (hover: none) { .btn kbd { display: none; } } /* keyboard shortcut hints only where there's a keyboard */
+@media (prefers-reduced-motion: reduce) { details.tutorial summary::before { transition: none; } }
 .panel { background: var(--panel); border: 1.5px solid var(--ink); border-radius: 10px; padding: 16px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .btn {
   border: 1.5px solid var(--ink); background: var(--panel); border-radius: 8px;
   padding: 8px 14px; cursor: pointer; min-height: 44px;
 }
-.btn:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+@media (hover: hover) { .btn:hover:not(:disabled) { background: var(--ink); color: var(--paper); } }
 .btn.primary { background: var(--ink); color: var(--paper); }
 .btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn kbd { font: 0.75em var(--sans); opacity: 0.6; margin-left: 4px; }
@@ -86,7 +101,7 @@ main { max-width: 980px; margin: 0 auto; padding: 20px 16px 40px; }
 .stats b { color: var(--ink); font-weight: 700; }
 .right { color: var(--green); font-weight: 700; }
 .wrong { color: var(--red); font-weight: 700; }
-input.ans { width: 5.5em; padding: 8px 10px; border: 1.5px solid var(--ink); border-radius: 8px; background: var(--card); color: #1c2b45; }
+input.ans { width: 5.5em; min-height: 44px; padding: 8px 10px; border: 1.5px solid var(--ink); border-radius: 8px; background: var(--card); color: #1c2b45; }
 
 /* Highlighter: the one bold mark, used for the correct answer. */
 .hl { background: linear-gradient(transparent 15%, var(--hl) 15%, var(--hl) 85%, transparent 85%); padding: 0 3px; }
