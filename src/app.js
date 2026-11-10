@@ -79,15 +79,19 @@
   // -> {el, input}. The ± button flips the sign, for phone keyboards without a minus key.
   // decimals: true for the true count. inputmode opens the phone's number pad (numeric = digits,
   // decimal = digits and a decimal point). Those pads have no minus key, hence the ± button.
-  function countField(id, labelText, decimals) {
-    var input = h("input", { class: "ans num", type: "text", id: id, autocomplete: "off", autocapitalize: "off",
+  // Ids are made unique per field: two modes can have a count question open at once, and a
+  // shared id would tie each label to the hidden screen's box. data-count keeps a stable hook.
+  var fieldSeq = 0;
+  function countField(name, labelText, decimals) {
+    var id = name + "-" + (++fieldSeq);
+    var input = h("input", { class: "ans num", type: "text", id: id, "data-count": name, autocomplete: "off", autocapitalize: "off",
       spellcheck: "false", placeholder: "e.g. -3", inputmode: decimals ? "decimal" : "numeric" });
     var flip = h("button", { type: "button", class: "btn", "aria-label": "Flip the sign of " + labelText, onclick: function () {
       var v = input.value.trim();
       input.value = v.charAt(0) === "-" ? v.slice(1) : "-" + v.replace(/^\+/, "");
       input.focus();
     } }, "±");
-    return { input: input, el: [h("label", { for: id, text: labelText }), h("div", { class: "row" }, flip, input),
+    return { input: input, label: labelText, el: [h("label", { for: id, text: labelText }), h("div", { class: "row" }, flip, input),
       h("p", { class: "small muted hint-neg", text: "Negative? Tap ± to add or remove the minus sign." })] };
   }
   // Wires a count form: checks every field parses before calling done(values...).
@@ -98,7 +102,7 @@
     function check() {
       for (var i = 0; i < fields.length; i++) {
         if (isNaN(parseCount(fields[i].input.value))) {
-          err.textContent = "Enter a number for " + fields[i].input.labels[0].textContent.split(" (")[0].toLowerCase() + ", like 3, -2 or +1.";
+          err.textContent = "Enter a number for " + fields[i].label.split(" (")[0].toLowerCase() + ", like 3, -2 or +1.";
           fields[i].input.focus();
           return;
         }
