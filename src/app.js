@@ -100,14 +100,27 @@
   })();
 
   /* =================================================================
-   * Table game: used by "Learn to play" (coach on) and "Count while playing" (count checks on)
+   * Table game: used by "Learn to play" (coach on), "Count while playing" (count checks on)
+   * and "Full table" (count checks on, other players at the table)
    * ================================================================= */
+  var SEAT_POS = { first: "First (acts first)", middle: "Middle", last: "Last (sees the most cards)" };
   function TableGame(root, opts) {
     this.root = root; this.opts = opts;
     this.stats = { hands: 0, net: 0, checks: 0, checksRight: 0, moves: 0, movesRight: 0 };
-    this.checkEvery = 3;
+    this.checkEvery = opts.others ? 1 : 3;
+    this.others = opts.others || 0;   // other players at the table
+    this.seatPos = "last";
     this.reset();
   }
+  TableGame.prototype.seats = function () { return this.others + 1; };
+  TableGame.prototype.userSeat = function () {
+    var n = this.seats();
+    return this.seatPos === "first" ? 0 : this.seatPos === "middle" ? Math.floor((n - 1) / 2) : n - 1;
+  };
+  TableGame.prototype.seatName = function (seat) {
+    if (seat === this.userSeat()) return "You";
+    return "Player " + (seat < this.userSeat() ? seat + 1 : seat);
+  };
   TableGame.prototype.reset = function (note) {
     var r = rules();
     this.shoe = new BJ.Shoe(r.decks);
@@ -117,24 +130,53 @@
     this.pendingCheck = false;
     this.fresh = 0;
     this.coachMsg = null;
+    this.lastCheck = null;
+    this.stopBots();
     this.msg = note || "";
     this.render();
   };
   TableGame.prototype.deal = function () {
     var self = this;
-    if (this.pendingCheck) return;
-    if (this.shoe.needsShuffle()) {
+    if (this.pendingCheck || (this.round && this.round.phase !== "done")) return;
+    // Shuffle at the cut card, or early if there might not be enough cards for a full round.
+    if (this.shoe.needsShuffle(this.seats() * 4 + 6)) {
       this.shoe.shuffle(); this.counter.reset();
       this.msg = "The dealer reached the cut card and shuffled. The count starts over at 0.";
     } else this.msg = "";
     this.coachMsg = null;
-    this.round = new BJ.Round(this.shoe, rules(), { onExpose: function (c) { self.counter.see(c); } });
+    this.round = new BJ.Round(this.shoe, rules(), {
+      seats: this.seats(), userSeat: this.userSeat(),
+      onExpose: function (c) { self.counter.see(c); },
+      onReshuffle: function () {
+        self.counter.reset();
+        self.msg = "The shoe ran out mid-hand, so the dealer shuffled the discards. The count starts over at 0 from here.";
+      }
+    });
     this.round.start(1);
     this.afterMove();
   };
+  // Other players play basic strategy, one move at a time so the user can follow and count.
+  TableGame.prototype.stopBots = function () { if (this.botTimer) { clearTimeout(this.botTimer); this.botTimer = null; } };
+  TableGame.prototype.stop = TableGame.prototype.stopBots;
+  TableGame.prototype.runBots = function () {
+    var self = this, rd = this.round;
+    this.stopBots();
+    if (!rd || rd.phase !== "player" || rd.isUserTurn()) return;
+    this.botTimer = setTimeout(function () {
+      self.botTimer = null;
+      if (self.round !== rd || rd.phase !== "player" || rd.isUserTurn()) return;
+      var hand = rd.current(), ok = rd.available();
+      var rec = S.recommend(CHARTS, rules(), hand, rd.dealer.cards[0], ok);
+      // Without a chart, other players fall back to "hit below 17".
+      var move = rec ? rec.action : (hand.total() < 17 ? "hit" : "stand");
+      if (!ok[move]) move = hand.total() < 17 ? "hit" : "stand";
+      rd.act(move);
+      self.afterMove();
+    }, this.opts.botDelay || 650);
+  };
   TableGame.prototype.act = function (action) {
     var rd = this.round;
-    if (!rd || rd.phase !== "player" || !rd.available()[action]) return;
+    if (!rd || rd.phase !== "player" || !rd.isUserTurn() || !rd.available()[action]) return;
     if (this.opts.coach) {
       var rec = S.recommend(CHARTS, rules(), rd.current(), rd.dealer.cards[0], rd.available());
       if (rec) {
@@ -157,10 +199,11 @@
       }
     }
     this.render();
+    this.runBots();
   };
   TableGame.prototype.hint = function () {
     var rd = this.round;
-    if (!rd || rd.phase !== "player") return;
+    if (!rd || rd.phase !== "player" || !rd.isUserTurn()) return;
     var rec = S.recommend(CHARTS, rules(), rd.current(), rd.dealer.cards[0], rd.available());
     this.coachMsg = rec ? { hint: true, rec: rec } : { missing: true };
     this.render();
@@ -183,7 +226,8 @@
   TableGame.prototype.render = function () {
     var self = this, rd = this.round, root = clear(this.root), o = this.opts;
     root.appendChild(o.intro());
-    var playing = rd && rd.phase === "player";
+    var inRound = rd && rd.phase === "player";
+    var playing = inRound && rd.isUserTurn();
     var ok = playing ? rd.available() : {};
 
     // Dealer
@@ -194,18 +238,29 @@
       h("h3", null, "Dealer", h("span", { class: "total", text: dealerTotal })),
       h("div", { class: "cards" }, dealerCards));
 
-    // Player hands
-    var hands = h("div", { class: "hands" });
-    if (rd) rd.hands.forEach(function (hd, i) {
-      var res = rd.results ? rd.results[i] : null;
-      var resText = res ? ({ blackjack: "Blackjack, win 1.5", win: "Win", push: "Push (tie)", lose: "Lose",
-        bust: "Bust", surrender: "Surrendered, half back" })[res.outcome] + (res.net ? " (" + signed(res.net) + ")" : "") : "";
-      hands.appendChild(h("div", { class: "hand" + (playing && i === rd.active && rd.hands.length > 1 ? " active" : "") },
-        h("div", { class: "cards" }, hd.cards.map(function (c) { return cardEl(c); })),
-        h("div", { class: "res" }, h("b", { text: totalText(hd) }), hd.doubled ? " (doubled)" : "",
-          resText ? h("span", { class: res.net > 0 ? "right" : res.net < 0 ? "wrong" : "" }, " " + resText) : null)));
-    });
-    var player = h("section", { class: "spot", "aria-label": "Your hand" }, h("h3", { text: rd && rd.hands.length > 1 ? "Your hands" : "You" }), hands);
+    // Seats: one section per seat, in the order they act.
+    var multi = this.seats() > 1;
+    var seatsEl = h("div", { class: multi ? "seats" : null });
+    var userSeat = this.userSeat();
+    for (var seat = 0; seat < this.seats(); seat++) {
+      var hands = h("div", { class: "hands" });
+      var mine = seat === userSeat;
+      if (rd) rd.hands.forEach(function (hd, i) {
+        if (hd.seat !== seat) return;
+        var res = rd.results ? rd.results[i] : null;
+        var resText = res ? ({ blackjack: "Blackjack, win 1.5", win: "Win", push: "Push (tie)", lose: "Lose",
+          bust: "Bust", surrender: "Surrendered, half back" })[res.outcome] + (mine && res.net ? " (" + signed(res.net) + ")" : "") : "";
+        var isActive = inRound && i === rd.active && (multi || rd.hands.length > 1);
+        hands.appendChild(h("div", { class: "hand" + (isActive ? " active" : "") },
+          h("div", { class: "cards" }, hd.cards.map(function (c) { return cardEl(c); })),
+          h("div", { class: "res" }, h("b", { text: totalText(hd) }), hd.doubled ? " (doubled)" : "",
+            resText ? h("span", { class: mine ? (res.net > 0 ? "right" : res.net < 0 ? "wrong" : "") : "muted" }, " " + resText) : null)));
+      });
+      var label = multi ? this.seatName(seat) : (rd && rd.hands.length > 1 ? "Your hands" : "You");
+      seatsEl.appendChild(h("section", { class: "spot" + (multi ? " seat" : "") + (multi && mine ? " mine" : ""), "aria-label": label },
+        h("h3", { text: label }), hands));
+    }
+    var player = seatsEl;
 
     // Actions
     var actions = h("div", { class: "row actions" });
@@ -215,6 +270,8 @@
           ACTION_LABEL[a], h("kbd", { text: ACTION_KEY[a].toUpperCase() })));
       });
       if (o.coach) actions.appendChild(h("button", { class: "btn", onclick: function () { self.hint(); } }, "What should I do?"));
+    } else if (inRound) {
+      actions.appendChild(h("p", { class: "muted", text: this.seatName(rd.current().seat) + " is playing. Count their cards." }));
     } else {
       actions.appendChild(h("button", { class: "btn primary", disabled: this.pendingCheck, onclick: function () { self.deal(); } },
         rd ? "Deal next hand" : "Deal", h("kbd", { text: "N" })));
@@ -260,6 +317,14 @@
         h("div", { class: "tray-fill", style: "width:" + (used * 100).toFixed(1) + "%" })),
       h("div", { class: "small muted num", text: "About " + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " of " + this.shoe.decks + " decks left" })));
 
+    if (this.opts.others) {
+      var others = h("select", { "aria-label": "Other players", onchange: function (e) { self.others = parseInt(e.target.value, 10); self.reset("Table changed. New shuffle, count back to 0."); } },
+        [1, 2, 3, 4, 5, 6].map(function (n) { return h("option", { value: n, selected: n === self.others ? "selected" : null }, String(n)); }));
+      var pos = h("select", { "aria-label": "Your seat", onchange: function (e) { self.seatPos = e.target.value; self.reset("Seat changed. New shuffle, count back to 0."); } },
+        Object.keys(SEAT_POS).map(function (k) { return h("option", { value: k, selected: k === self.seatPos ? "selected" : null }, SEAT_POS[k]); }));
+      side.appendChild(h("p", { class: "small" }, "Other players ", others));
+      side.appendChild(h("p", { class: "small" }, "Your seat ", pos));
+    }
     var every = h("select", { "aria-label": "Check my count every", onchange: function (e) { self.checkEvery = parseInt(e.target.value, 10); } },
       [1, 3, 5].map(function (n) { return h("option", { value: n, selected: n === self.checkEvery ? "selected" : null }, n === 1 ? "every hand" : "every " + n + " hands"); }));
     side.appendChild(h("p", { class: "small" }, "Check my count ", every));
@@ -497,12 +562,20 @@
       h("p", { text: "True count = running count ÷ decks left in the shoe. Use the discard tray to estimate decks left, the same way players do at a real table." }));
   }
 
+  function tableIntro() {
+    return h("div", { class: "intro" },
+      h("h2", { text: "Full table" }),
+      h("p", { text: "A real table has other players, and every card they're dealt counts too. Here the other players play basic strategy on their own while you keep the running count of the whole table: their cards, your cards, and the dealer's." }),
+      h("p", { text: "Pick how many players and where you sit. Sitting last means you see everyone else's cards before you decide." }));
+  }
+
   var app = document.getElementById("app");
   var builders = {
     learn: function (el) { return new TableGame(el, { coach: true, intro: learnIntro }); },
     quiz: function (el) { return new Quiz(el); },
     drill: function (el) { return new Drill(el); },
-    count: function (el) { return new TableGame(el, { countChecks: true, intro: countIntro }); }
+    count: function (el) { return new TableGame(el, { countChecks: true, intro: countIntro }); },
+    table: function (el) { return new TableGame(el, { countChecks: true, others: 3, intro: tableIntro }); }
   };
   var instances = {}, current = null, currentName = null;
   var holders = {};
@@ -515,6 +588,7 @@
     // Drop focus from the tab so keyboard shortcuts (like Space to flip) go to the mode.
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     current = instances[name]; currentName = name;
+    if (current.runBots) current.runBots(); // resume other players if we left mid-round
     document.querySelectorAll(".modes button").forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.mode === name)); });
     store("bj.mode", name);
   }

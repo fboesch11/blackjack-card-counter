@@ -116,6 +116,13 @@ input.ans { width: 5.5em; padding: 8px 10px; border: 1.5px solid var(--ink); bor
 .spot h3 { font: 600 1rem/1.2 var(--sans); margin: 0 0 6px; }
 .spot .total { font-weight: 400; color: var(--ink-soft); margin-left: 6px; }
 .hands { display: flex; flex-wrap: wrap; gap: 16px; }
+.seats { display: flex; flex-wrap: wrap; gap: 12px 20px; }
+.seat { padding: 8px; border-radius: 10px; }
+.seat .card { width: 50px; height: 71px; }
+.seat .card .s { font-size: 1.4rem; }
+.seat.mine { background: var(--panel); outline: 1.5px solid var(--ink); }
+.seat.mine .card { width: 62px; height: 88px; }
+.seat.mine .card .s { font-size: 1.8rem; }
 .hand { padding: 6px; border-radius: 10px; border: 1.5px dashed transparent; }
 .hand.active { border-color: var(--ink); }
 .hand .res { font-size: 0.9rem; margin-top: 4px; }

@@ -125,3 +125,50 @@ test("hole card is only counted once revealed", () => {
   r.act("stand");
   assert.equal(seen.length, 5, "hole card + dealer hit revealed after player stands");
 });
+
+test("multi-seat: deal order is each seat, dealer up, each seat, dealer hole", () => {
+  // Seats 0,1,2 get 2,3,4 then 5,6,7; dealer up 9, hole 8.
+  const shoe = new BJ.Shoe(1, { cards: cards("2 3 4 9 5 6 7 8 10 10 10 10") });
+  const r = new BJ.Round(shoe, BJ.makeRules(), { seats: 3, userSeat: 2 }).start();
+  assert.deepEqual(r.hands.map((h) => h.cards.map((x) => x.rank).join(",")), ["2,5", "3,6", "4,7"]);
+  assert.equal(r.dealer.cards[0].rank, "9");
+  assert.equal(r.current().seat, 0, "seat 0 acts first");
+  assert.equal(r.isUserTurn(), false);
+});
+
+test("multi-seat: net() reports only the requested seat", () => {
+  // Seat 0: 10,10 (20). Seat 1 (user): 10,6 (16). Dealer 10,8 = 18.
+  const shoe = new BJ.Shoe(1, { cards: cards("10 10 10 10 6 8") });
+  const r = new BJ.Round(shoe, BJ.makeRules(), { seats: 2, userSeat: 1 }).start();
+  r.act("stand"); // seat 0
+  assert.equal(r.isUserTurn(), true);
+  r.act("stand"); // user
+  assert.equal(r.net(0), 1);
+  assert.equal(r.net(), -1);
+});
+
+test("dealer doesn't draw when every hand is a blackjack or bust", () => {
+  const r = roundWith("A 5 K 10 9").start(); // player blackjack, dealer 5,10
+  assert.equal(r.dealer.cards.length, 2);
+});
+
+test("shoe running out mid-round reshuffles without duplicating table cards", () => {
+  let seed = 7;
+  const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  let reshuffles = 0;
+  for (let n = 0; n < 2000; n++) {
+    const shoe = new BJ.Shoe(1, { rng, penetration: 1 });
+    // Deal rounds until the shoe is nearly gone so a round has to run out mid-way.
+    while (shoe.remaining() > 0) {
+      const r = new BJ.Round(shoe, BJ.makeRules({ decks: 1 }), { seats: 4, onReshuffle: () => reshuffles++ }).start();
+      while (r.phase === "player") {
+        const ok = r.available();
+        r.act(ok.split ? "split" : r.current().total() < 17 ? "hit" : "stand");
+      }
+      const seen = r.dealer.cards.concat(...r.hands.map((h) => h.cards)).map((c) => c.rank + c.suit);
+      assert.equal(new Set(seen).size, seen.length, "a physical card appeared twice on the table");
+      if (reshuffles) break;
+    }
+  }
+  assert.ok(reshuffles > 0, "test should hit the mid-round reshuffle");
+});

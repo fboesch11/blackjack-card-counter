@@ -17,6 +17,7 @@ Rule sets: 1D-H17, 1D-S17, 2D-H17, 2D-S17, 6D-H17, 6D-S17
 | Strategy Quiz | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | Count Drill | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | Count While Playing | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| Full Table | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 
 ## Specific checks
 - [ ] Changing settings mid-mode reshuffles and resets the count
@@ -26,6 +27,8 @@ Rule sets: 1D-H17, 1D-S17, 2D-H17, 2D-S17, 6D-H17, 6D-S17
 - [ ] Surrender only offered on the first two cards, not after a split
 - [ ] Double offered after a split (DAS)
 - [ ] Split aces get one card each
+- [ ] Full table: other players' cards count; seat first/middle/last changes who acts before you; 1 and 6 other players both work
+- [ ] 1 deck with 6 other players: the shoe never errors; a mid-hand reshuffle shows a message and resets the count
 - [ ] Quiz answers match the CSV for the current rule set, including hands that differ between charts:
   - [ ] 11 vs A
   - [ ] A,8 vs 6

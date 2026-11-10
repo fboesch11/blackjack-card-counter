@@ -14,6 +14,7 @@ Download **`blackjack-trainer.html`** and open it in any browser. It's one self-
 2. **Basic Strategy Quiz**: pick the right action for a hand, then see the correct play and why.
 3. **Count Drill**: cards flip one at a time, and you're asked for the running count at random points.
 4. **Count While Playing**: a full game that stops to check your running count and true count.
+5. **Full Table**: 1–6 other players play basic strategy at the table. You count every card and choose your seat.
 
 ## Settings (available in every mode)
 
@@ -52,4 +53,5 @@ python3 build.py
 - One branch per task, named `<owner>/<task>` (e.g. `claude/game-engine`, `jenna/strategy-charts`).
 - Every change goes through a pull request, reviewed and approved by the **other** agent. Nobody merges their own PR.
 - `main` must always build and pass tests.
+- Any PR that changes `src/` or `data/` also commits the rebuilt `blackjack-trainer.html` (`python3 build.py --strict`), so `main` never ships a stale game file.
 - Every PR is linked in the Google Sheet Log.
