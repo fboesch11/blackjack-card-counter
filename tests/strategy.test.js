@@ -72,3 +72,31 @@ test("balanced count identity: RC equals high-minus-low left in the shoe", () =>
     }
   }
 });
+
+test("missed cards: exact distribution matches brute force on a small shoe", () => {
+  const M = require("../src/math.js");
+  // 3 low (+1), 2 neutral (0), 4 high (-1); draw 3. Enumerate every 3-card subset.
+  const tags = [1, 1, 1, 0, 0, -1, -1, -1, -1], k = 3, brute = {};
+  let total = 0;
+  for (let i = 0; i < 9; i++) for (let j = i + 1; j < 9; j++) for (let m = j + 1; m < 9; m++) {
+    const d = tags[i] + tags[j] + tags[m]; brute[d] = (brute[d] || 0) + 1; total++;
+  }
+  const dist = M.countShiftDist(3, 2, 4, k);
+  for (const d of Object.keys(brute)) assert.ok(Math.abs(dist.pmf[d] - brute[d] / total) < 1e-12, `D=${d}`);
+  const sum = Object.values(dist.pmf).reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(sum - 1) < 1e-12);
+});
+
+test("missed cards: mean and SD from the pmf equal the closed forms", () => {
+  const M = require("../src/math.js");
+  for (const [l, n, h, k] of [[77, 48, 83, 10], [20, 12, 20, 52], [100, 70, 90, 20], [5, 3, 9, 5]]) {
+    const d = M.countShiftDist(l, n, h, k);
+    let mean = 0, sq = 0;
+    for (const x of d.values) { mean += x * d.pmf[x]; sq += x * x * d.pmf[x]; }
+    assert.ok(Math.abs(mean - d.mean) < 1e-9, "mean");
+    assert.ok(Math.abs(Math.sqrt(sq - mean * mean) - d.sd) < 1e-9, "sd");
+  }
+  // A full deck drawn completely: change is exactly 0.
+  const full = M.countShiftDist(20, 12, 20, 52);
+  assert.equal(full.mode, 0); assert.ok(Math.abs(full.pmf[0] - 1) < 1e-12);
+});

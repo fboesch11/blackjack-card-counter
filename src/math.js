@@ -35,6 +35,43 @@
     return c / Math.sqrt(vx * vy);
   }
 
+  /* ---------- Missed cards: distribution of the count change ----------
+   * k cards leave the shoe unseen. The shoe's unseen part has l low, n0 neutral and h high cards
+   * (N = l + n0 + h). The change in running count is D = (#low among the k) - (#high among the k).
+   * The k cards are a draw without replacement, so (#low, #neutral, #high) is multivariate
+   * hypergeometric:  P(a, b, c) = C(l,a) C(n0,b) C(h,c) / C(N,k),  a + b + c = k.
+   * Returns the exact distribution of D plus its mean and standard deviation. */
+  var LF = [0];
+  function logFact(n) { for (var i = LF.length; i <= n; i++) LF[i] = LF[i - 1] + Math.log(i); return LF[n]; }
+  function logC(n, r) { return r < 0 || r > n ? -Infinity : logFact(n) - logFact(r) - logFact(n - r); }
+  function countShiftDist(l, n0, h, k) {
+    var N = l + n0 + h, pmf = {}, base = logC(N, k);
+    for (var a = 0; a <= Math.min(l, k); a++)
+      for (var c = 0; c <= Math.min(h, k - a); c++) {
+        var b = k - a - c;
+        if (b > n0) continue;
+        var p = Math.exp(logC(l, a) + logC(n0, b) + logC(h, c) - base);
+        pmf[a - c] = (pmf[a - c] || 0) + p;
+      }
+    // Closed forms (draws without replacement): mean = k·mu, var = k·sigma²·(N-k)/(N-1)
+    var mu = (l - h) / N, sigma2 = (l + h) / N - mu * mu;
+    var variance = N > 1 ? k * sigma2 * (N - k) / (N - 1) : 0;
+    var keys = Object.keys(pmf).map(Number).sort(function (x, y) { return x - y; });
+    var mode = keys[0];
+    keys.forEach(function (x) { if (pmf[x] > pmf[mode] + 1e-12) mode = x; });
+    return { pmf: pmf, values: keys, mean: k * mu, sd: Math.sqrt(variance), mode: mode };
+  }
+  // Smallest central range [lo, hi] (around the mode) holding at least `mass` of the probability.
+  function centralRange(dist, mass) {
+    var lo = dist.mode, hi = dist.mode, tot = dist.pmf[dist.mode];
+    while (tot < mass - 1e-12) {
+      var pl = dist.pmf[lo - 1] || 0, ph = dist.pmf[hi + 1] || 0;
+      if (!pl && !ph) break;
+      if (pl >= ph) { lo--; tot += pl; } else { hi++; tot += ph; }
+    }
+    return [lo, hi, tot];
+  }
+
   function MathTab(el, ctx) {
     this.root = el; this.ctx = ctx;
     this.reset();
@@ -42,9 +79,33 @@
   MathTab.prototype.reset = function () {
     this.shoe = new BJ.Shoe(this.ctx.rules().decks, { penetration: 1 });
     this.seen = [];
+    this.newMiss();
     this.render();
   };
   MathTab.prototype.key = function () {};
+  // Missed-cards exercise: deal a random part of a fresh shoe face up (so the count is known),
+  // then k more cards go by unseen. The user estimates the most likely running count now.
+  MathTab.prototype.newMiss = function () {
+    var d = this.ctx.rules().decks, k = this.missK || 10;
+    var shoe = new BJ.Shoe(d, { penetration: 1 });
+    var seenN = Math.floor(shoe.total * (0.1 + Math.random() * 0.55));
+    var rc = 0, i, seen = { L: 0, N: 0, H: 0 };
+    for (i = 0; i < seenN; i++) { var c = shoe.draw(); rc += BJ.hiLo(c); seen[group(c)]++; }
+    var hidden = [];
+    for (i = 0; i < k; i++) hidden.push(shoe.draw());
+    var dist = countShiftDist(20 * d - seen.L, 12 * d - seen.N, 20 * d - seen.H, k);
+    var actual = rc + hidden.reduce(function (s, c) { return s + BJ.hiLo(c); }, 0);
+    this.miss = { d: d, k: k, rc: rc, left: shoe.total - seenN, hidden: hidden, dist: dist, actual: actual, answer: null };
+  };
+  MathTab.prototype.answerMiss = function (v) {
+    var m = this.miss, best = m.dist.pmf[m.dist.mode];
+    // Right if the guess is a most-likely value (ties count) or the mean rounded to a whole number.
+    var p = m.dist.pmf[v - m.rc] || 0;
+    m.answer = { v: v, ok: p >= best - 1e-9 || v === Math.round(m.rc + m.dist.mean) };
+    this.missStats = this.missStats || { n: 0, right: 0 };
+    this.missStats.n++; if (m.answer.ok) this.missStats.right++;
+    this.render();
+  };
   MathTab.prototype.deal = function (n) {
     for (var i = 0; i < n && this.shoe.remaining() > 1; i++) this.seen.push(this.shoe.draw());
     this.render();
@@ -161,6 +222,7 @@
 
     // 9. Lab
     root.appendChild(this.renderLab());
+    root.appendChild(this.renderMiss());
 
     root.appendChild(h("section", { class: "math-sec small muted" }, h("h3", { text: "Sources" }),
       h("ul", null, [
@@ -211,6 +273,98 @@
       h("p", { class: "small muted", text: "The insurance line treats the next card as the hole card and ignores which card is the dealer's ace, so it's an approximation." }));
   };
 
-  root.BJMath = { MathTab: MathTab, tagCorrelation: tagCorrelation, EOR: EOR };
+  // Bar chart of the distribution of the new running count. Highlights the most likely value
+  // and, once answered, the count the hidden cards actually produced.
+  function distChart(h, m, reveal) {
+    var vals = m.dist.values.filter(function (x) { return m.dist.pmf[x] >= 0.002; });
+    var W = 640, H = 200, padL = 36, padB = 30, padT = 12;
+    var maxP = 0; vals.forEach(function (x) { maxP = Math.max(maxP, m.dist.pmf[x]); });
+    var bw = (W - padL - 8) / vals.length;
+    var NS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H); svg.setAttribute("class", "dist");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Probability of each possible running count after " + m.k + " unseen cards. Most likely: " +
+      sgn(m.rc + m.dist.mode) + ".");
+    function el(tag, attrs, text) {
+      var e = document.createElementNS(NS, tag);
+      for (var a in attrs) e.setAttribute(a, attrs[a]);
+      if (text != null) e.textContent = text;
+      svg.appendChild(e); return e;
+    }
+    el("line", { x1: padL, y1: H - padB, x2: W - 4, y2: H - padB, class: "axis" });
+    [0, 0.5, 1].forEach(function (f) {
+      var y = H - padB - f * (H - padB - padT);
+      el("text", { x: padL - 6, y: y + 4, "text-anchor": "end", class: "tick" }, Math.round(maxP * f * 100) + "%");
+    });
+    vals.forEach(function (x, i) {
+      var p = m.dist.pmf[x], bh = (p / maxP) * (H - padB - padT);
+      var cls = "bar" + (x === m.dist.mode ? " mode" : "") + (reveal && m.rc + x === m.actual ? " actual" : "");
+      var r = el("rect", { x: padL + i * bw + 1, y: H - padB - bh, width: Math.max(bw - 2, 1), height: bh, rx: 2, class: cls });
+      var t = document.createElementNS(NS, "title"); t.textContent = "Count " + sgn(m.rc + x) + ": " + (p * 100).toFixed(1) + "%"; r.appendChild(t);
+      if (vals.length <= 24 || i % 2 === 0)
+        el("text", { x: padL + i * bw + bw / 2, y: H - padB + 16, "text-anchor": "middle", class: "tick" }, sgn(m.rc + x));
+    });
+    return svg;
+  }
+  function sgn(x) { return (x > 0 ? "+" : "") + x; }
+
+  MathTab.prototype.renderMiss = function () {
+    var h = this.ctx.h, self = this, m = this.miss, D = m.dist;
+    var r68 = centralRange(D, 0.68), r95 = centralRange(D, 0.95);
+    var input = h("input", { class: "ans num", type: "text", id: "miss-ans", "data-count": "miss", inputmode: "numeric",
+      autocomplete: "off", placeholder: "e.g. -3" });
+    var err = h("p", { class: "wrong small", role: "alert" });
+    function submit() {
+      var t = String(input.value).trim().replace(/[\u2212\u2013]/g, "-");
+      if (!/^[+-]?\d+$/.test(t)) { err.textContent = "Enter a whole number, like 3, -2 or +1."; input.focus(); return; }
+      self.answerMiss(parseInt(t, 10));
+    }
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+    var flip = h("button", { type: "button", class: "btn", "aria-label": "Flip the sign of your estimate", onclick: function () {
+      var v = input.value.trim(); input.value = v.charAt(0) === "-" ? v.slice(1) : "-" + v.replace(/^\+/, ""); input.focus(); } }, "±");
+    var kSel = h("select", { "aria-label": "Unseen cards", onchange: function (e) { self.missK = parseInt(e.target.value, 10); self.newMiss(); self.render(); } },
+      [5, 10, 20, 52].map(function (k) { return h("option", { value: k, selected: k === m.k ? "selected" : null }, k + " cards"); }));
+
+    var sec = h("section", { class: "math-sec panel lab" },
+      h("h3", { text: "10. Missed cards: estimating a count you lost track of" }),
+      h("p", { text: "Say you know the running count, then some cards go by that you didn't see. You can't know the new count, but you can work out the probability of every possible value. The unseen cards are a random sample from what's left in the shoe, so the change in the count has an exact distribution." }),
+      h("p", { class: "eq", text: "change D = (low cards among the k) − (high cards among the k)" }),
+      h("p", { class: "eq", text: "P(a low, b neutral, c high) = C(l, a) · C(n, b) · C(h, c) ÷ C(N, k),  a + b + c = k" }),
+      h("p", { class: "eq", text: "E[D] = k · (l − h) ÷ N = −k · RC ÷ N,   Var(D) = k · σ² · (N − k) ÷ (N − 1)" }),
+      h("p", { class: "small", text: "Here l, n and h are the low, neutral and high cards left, N = l + n + h, σ² is the variance of one unseen card's tag, and (N − k) ÷ (N − 1) is the finite-population correction for drawing without replacement. Because l − h = −RC (section 3), the expected change always pulls the count back toward 0, but only by k ÷ N of it. The best single guess is usually the count you already had." }),
+      h("p", { class: "row small" }, "Cards missed ", kSel));
+
+    sec.appendChild(h("div", { class: "miss-q" },
+      h("p", null, h("b", { text: "Your count was " + sgn(m.rc) + " with " + m.left + " cards (" + (m.left / 52).toFixed(2) + " decks) left. Then " + m.k + " cards went by unseen." })),
+      m.answer ? null : h("div", null,
+        h("label", { for: "miss-ans", text: "Most likely running count now" }),
+        h("div", { class: "row" }, flip, input,
+          h("button", { type: "button", class: "btn primary", onclick: submit }, "Check")), err)));
+
+    if (m.answer) {
+      var A = m.answer;
+      sec.appendChild(h("div", { class: "feedback", "aria-live": "polite" },
+        h("p", null, A.ok ? h("span", { class: "right", text: "Good estimate. " }) : h("span", { class: "wrong", text: "Not the most likely value. " }),
+          "Most likely new count: ", h("span", { class: "hl num", text: sgn(m.rc + D.mode) }),
+          " (" + (D.pmf[D.mode] * 100).toFixed(1) + "% chance). Average: " + sgn(Math.round((m.rc + D.mean) * 100) / 100) + "."),
+        h("p", { class: "eq", text: "E[D] = −" + m.k + " × (" + sgn(m.rc) + ") ÷ " + m.left + " = " + (Math.round(D.mean * 100) / 100 || 0) +
+          ",   SD = " + D.sd.toFixed(2) }),
+        h("p", { text: "68% range: " + sgn(m.rc + r68[0]) + " to " + sgn(m.rc + r68[1]) + " (" + (r68[2] * 100).toFixed(0) + "%).  95% range: " +
+          sgn(m.rc + r95[0]) + " to " + sgn(m.rc + r95[1]) + " (" + (r95[2] * 100).toFixed(0) + "%)." }),
+        distChart(h, m, true),
+        h("p", { class: "small muted" }, h("span", { class: "key-mode" }, "■"), " most likely  ", h("span", { class: "key-actual" }, "■"),
+          " what the hidden cards actually made: " + sgn(m.actual)),
+        h("div", { class: "cards lab-cards", "aria-label": "The cards you missed" }, m.hidden.map(function (c) { return self.ctx.cardEl(c); })),
+        h("p", { class: "small muted", text: "Normal approximation for comparison: about " + sgn(Math.round(m.rc + D.mean)) + " ± " +
+          (1.96 * D.sd).toFixed(1) + " for 95%. The exact bars above are what the game grades against." }),
+        h("button", { type: "button", class: "btn primary", onclick: function () { self.newMiss(); self.render(); } }, "Try another")));
+    }
+    if (this.missStats) sec.appendChild(h("p", { class: "stats" }, h("span", null, "Estimates right ",
+      h("b", { class: "num", text: this.missStats.right + "/" + this.missStats.n }))));
+    return sec;
+  };
+
+  root.BJMath = { MathTab: MathTab, tagCorrelation: tagCorrelation, EOR: EOR, countShiftDist: countShiftDist, centralRange: centralRange };
   if (typeof module !== "undefined" && module.exports) module.exports = root.BJMath;
 })(typeof window !== "undefined" ? window : this);

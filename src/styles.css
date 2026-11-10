@@ -188,3 +188,14 @@ table.chart td.hit { outline: 3px solid var(--ink); background: var(--hl); color
 .lab-cards .card .s { font-size: 1.2rem; bottom: 4px; right: 5px; }
 .hint-neg { margin: 4px 0 0; }
 @media (hover: hover) { .hint-neg { display: none; } } /* only phones/tablets need the ± tip */
+
+/* Missed-cards distribution chart */
+svg.dist { width: 100%; max-width: 640px; height: auto; display: block; margin: 8px 0; }
+svg.dist .bar { fill: var(--grid); stroke: var(--ink-soft); stroke-width: 1; }
+svg.dist .bar.mode { fill: var(--hl); stroke: var(--ink); }
+svg.dist .bar.actual { stroke: var(--red); stroke-width: 3; }
+svg.dist .axis { stroke: var(--ink); stroke-width: 1.5; }
+svg.dist .tick { fill: var(--ink-soft); font: 11px var(--sans); }
+.key-mode { color: var(--hl); }
+.key-actual { color: var(--red); }
+.miss-q label { display: block; margin: 8px 0 4px; font-size: 0.9rem; }
