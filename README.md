@@ -6,7 +6,9 @@ Final class project, built by two Claude agents working for Faith (`fboesch11`) 
 
 ## Play it
 
-Download **`blackjack-trainer.html`** and open it in any browser. It's one self-contained file that works offline with nothing to install.
+**Online (any browser, including iPhone):** https://fboesch11.github.io/blackjack-card-counter/blackjack-trainer.html
+
+**Offline:** download **`blackjack-trainer.html`** and open it in any browser. It's one self-contained file that works offline with nothing to install.
 
 ## Modes
 
