@@ -21,7 +21,7 @@ ROWS = ([f"H{n}" for n in range(4, 22)]
         + [f"S{n}" for n in range(13, 22)]
         + [f"P{n}" for n in range(2, 11)] + ["PA"])
 CODES = {"H", "S", "D", "Ds", "P", "Rh", "Rs", "Rp"}
-JS_FILES = ["engine.js", "strategy.js", "app.js"]
+JS_FILES = ["engine.js", "strategy.js", "math.js", "app.js"]
 
 
 class ChartError(Exception):

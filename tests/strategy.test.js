@@ -54,3 +54,21 @@ test("missing chart returns null instead of guessing", () => {
   const s17 = BJ.makeRules({ decks: 6, h17: false });
   assert.equal(S.recommend(fixture, s17, hand("6 5"), c("A"), all), null);
 });
+
+test("math tab: Hi-Lo tags correlate ~0.96 with the effect-of-removal table", () => {
+  const M = require("../src/math.js");
+  assert.equal(M.tagCorrelation(M.EOR.s17).toFixed(2), "0.96");
+  assert.equal(M.tagCorrelation(M.EOR.h17).toFixed(2), "0.96");
+});
+
+test("balanced count identity: RC equals high-minus-low left in the shoe", () => {
+  for (const d of [1, 2, 6]) {
+    const shoe = new BJ.Shoe(d), k = new BJ.Counter();
+    let hiLeft = 20 * d, loLeft = 20 * d;
+    for (let i = 0; i < 52 * d - 1; i++) {
+      const c = shoe.draw(); k.see(c);
+      if (BJ.hiLo(c) === 1) loLeft--; else if (BJ.hiLo(c) === -1) hiLeft--;
+      assert.equal(k.running, hiLeft - loLeft);
+    }
+  }
+});
