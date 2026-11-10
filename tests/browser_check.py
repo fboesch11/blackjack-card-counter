@@ -95,7 +95,7 @@ STATE_JS = r"""() => {
     playingText: (p.querySelector('.actions p')||{}).innerText||'',
     msg:(p.querySelector('.msg')||{}).innerText||'', coach:(p.querySelector('.coach')||{}).innerText||'',
     coachHl:(p.querySelector('.coach .hl')||{}).innerText||'',
-    pending: !!p.querySelector('form.check #rc'), side: side?side.innerText:''};
+    pending: !!p.querySelector('.check #rc'), side: side?side.innerText:''};
 }"""
 
 def new_page(browser, mobile=False, clock=False):
@@ -117,8 +117,9 @@ def new_page(browser, mobile=False, clock=False):
     return page
 
 def set_rules(page, d, h):
-    page.check(f'input[name=decks][value="{d}"]', force=True)
-    page.check(f'input[name=h17][value="{1 if h else 0}"]', force=True)
+    # click() from JS fires the same change event as a tap, without needing the radio on screen
+    for sel in (f'input[name=decks][value="{d}"]', f'input[name=h17][value="{1 if h else 0}"]'):
+        page.evaluate("s => { const el = document.querySelector(s); if (!el.checked) el.click(); }", sel)
 
 def go(page, mode): page.click(f'.modes button[data-mode="{mode}"]')
 def panel(page): return page.locator('[role=tabpanel]:not([hidden])')
@@ -272,7 +273,7 @@ def do_check(page, mode, rs, tr, where):
     m = re.search(r"About ([\d.]+) of (\d+) decks left", st["side"])
     shown_left = float(m.group(1)) if m else None
     if not tr.synced:
-        panel(page).locator("#rc").fill("0"); panel(page).locator("#tc").fill("0"); panel(page).locator("form.check button[type=submit]").click()
+        panel(page).locator("#rc").fill("0"); panel(page).locator("#tc").fill("0"); panel(page).locator(".check button.btn.primary").click()
         side = state(page)["side"]
         rc = int(re.search(r"It was ([+\-−]?\d+)", side).group(1).replace("−", "-"))
         # resync from the game's answer; only safe because we stop checking until the next shuffle
@@ -282,10 +283,10 @@ def do_check(page, mode, rs, tr, where):
         stat("count checks skipped after mid-hand reshuffle")
         return True
     exact_tc = tr.tc()
-    test_wrong_tc = random.random() < 0.2 and abs(tr.rc / tr.decks - exact_tc) > 0.75
+    test_wrong_tc = random.random() < 0.2 and abs(round(tr.rc / tr.decks) - exact_tc) > 0.5 + 1e-9
     tc_in = round(tr.rc / tr.decks) if test_wrong_tc else round(exact_tc)
     panel(page).locator("#rc").fill(str(tr.rc)); panel(page).locator("#tc").fill(str(tc_in))
-    panel(page).locator("form.check button[type=submit]").click()
+    panel(page).locator(".check button.btn.primary").click()
     side = state(page)["side"]
     rc_ok = "Running count: right" in side
     tc_ok = "True count: right" in side
@@ -392,7 +393,7 @@ def run_drill(page, rs, use_pm=False, max_checks=None):
                 panel(page).locator("#drc").fill(str(rc))
             if d["tc"]: panel(page).locator("#dtc").fill(str(round(rc / left)))
             elif not final: issue(f"{where}: true count box missing though 'Also ask the true count' is ticked")
-            panel(page).locator("form.check button[type=submit]").click()
+            panel(page).locator(".check button.btn.primary").click()
             fb = page.evaluate(DRILL_JS)["fb"]
             checks += 1; stat("drill count checks")
             if not fb.startswith("Right"):
@@ -411,6 +412,51 @@ def run_drill(page, rs, use_pm=False, max_checks=None):
     if rc != 0: issue(f"{where}: full shoe counted to {rc}, not 0"); check("A full shoe counts down to 0", False); ok = False
     if dealt != total: issue(f"{where}: drill dealt {dealt} cards, expected {total}"); check("Shoe holds 52 x decks cards", False); ok = False
     RESULTS["notes"].append(f"{where}: {dealt} cards, {checks} checks, final count {rc}")
+    return ok
+
+# ---------------------------------------------------------------- the math tab (lab)
+MATH_JS = r"""() => {
+  const p=[...document.querySelectorAll('[role=tabpanel]')].find(x=>!x.hidden);
+  const lab=p.querySelector('.lab'); if(!lab) return null;
+  const cards=[...lab.querySelectorAll('.lab-cards .card')].map(c=>c.getAttribute('aria-label').split(' of ')[0]);
+  return {cards, eq:[...lab.querySelectorAll('.eq')].map(e=>e.innerText)};
+}"""
+
+def run_math(page, rs):
+    where = f"math {rs[0]}D-{'H17' if rs[1] else 'S17'}"
+    ok = True
+    lab = page.evaluate(MATH_JS)
+    if lab is None: issue(f"{where}: lab section not found"); return False
+    rc = tens = n = 0
+    total = 52 * rs[0]
+    for i in range(25):
+        panel(page).get_by_role("button", name="Deal 1", exact=True).click()
+        lab = page.evaluate(MATH_JS)
+        c = lab["cards"][-1]; rc += hilo(c); n += 1; tens += val(c) == 10
+        eq = " | ".join(lab["eq"]).replace("−", "-")
+        m = re.search(r"= ([+-]?\d+)$", lab["eq"][0].replace("−", "-").strip())
+        if not m or int(m.group(1)) != rc:
+            issue(f"{where}: lab RC shows {m.group(1) if m else '?'} after {n} cards, I counted {rc}"); ok = False; break
+        if "equal, as section 3 predicts" not in eq:
+            issue(f"{where}: lab identity line says mismatch after {n} cards"); ok = False
+        left = (total - n) / 52
+        tcm = re.search(r"TC = .*= ([+-]?[\d.]+)$", lab["eq"][2].replace("−", "-"))
+        if tcm and abs(float(tcm.group(1)) - rc / left) > 0.01:
+            issue(f"{where}: lab TC {tcm.group(1)}, expected {rc/left:.2f}"); ok = False
+        pm = re.search(r"= ([\d.]+)%", lab["eq"][3])
+        exp_p = (16 * rs[0] - tens) / (total - n) * 100
+        if pm and abs(float(pm.group(1)) - exp_p) > 0.006:
+            issue(f"{where}: lab P(ten) {pm.group(1)}%, expected {exp_p:.2f}%"); ok = False
+    stat("math lab cards checked", n)
+    for _ in range(rs[0] + 2):
+        panel(page).get_by_role("button", name="Deal a deck").click()
+    lab = page.evaluate(MATH_JS)
+    eq = " | ".join(lab["eq"]).replace("−", "-")
+    m = re.search(r"\|U\| ÷ 52\) = ([+-]?\d+) ÷ ([\d.]+)", eq)
+    if not m or m.group(2) != "0.02" or abs(int(m.group(1))) > 1:
+        issue(f"{where}: after dealing the whole shoe the lab shows {m.groups() if m else eq[:120]!r} (expected 1 card left, RC within ±1)"); ok = False
+    if "equal, as section 3 predicts" not in eq: issue(f"{where}: identity mismatch at end of shoe"); ok = False
+    panel(page).get_by_role("button", name="Reshuffle").click()
     return ok
 
 # ---------------------------------------------------------------- layout
@@ -438,10 +484,12 @@ def main():
         quiz_specific(page)
         for rs in RULESETS:
             set_rules(page, *rs)
-            for mode in ("learn", "quiz", "drill", "count", "table"):
+            for mode in ("learn", "quiz", "drill", "count", "table", "math"):
                 go(page, mode)
                 n0 = len(page._errs)
-                if mode == "learn":
+                if mode == "math":
+                    ok = run_math(page, rs)
+                elif mode == "learn":
                     tr = Tracker(rs[0]); ok = play_table(page, mode, rs, n_round, tr, coach=True, clock=True)
                 elif mode == "quiz":
                     ok = run_quiz(page, rs, n_quiz)
@@ -486,7 +534,7 @@ def main():
             seen_after = 0
             for _ in range(12):
                 if state(page)["pending"]:
-                    panel(page).locator("#rc").fill("0"); panel(page).locator("#tc").fill("0"); panel(page).locator("form.check button[type=submit]").click()
+                    panel(page).locator("#rc").fill("0"); panel(page).locator("#tc").fill("0"); panel(page).locator(".check button.btn.primary").click()
                 panel(page).locator(".actions button.primary").click()
                 while True:
                     st = state(page)
@@ -550,15 +598,15 @@ def main():
             go(page, m)
             n0 = len(page._errs)
             panel(page).locator("#rc").fill("abc"); panel(page).locator("#tc").fill("1")
-            panel(page).locator("form.check button[type=submit]").click(); page.clock.run_for(50)
-            alert = panel(page).locator("form.check [role=alert]").inner_text()
+            panel(page).locator(".check button.btn.primary").click(); page.clock.run_for(50)
+            alert = panel(page).locator(".check [role=alert]").inner_text()
             errs = page._errs[n0:]; del page._errs[n0:]
             ok = bool(alert) and not errs
             if not ok: issue(f"{m}: typed 'abc' while both count screens had a question open: message {alert!r}, page error {errs}")
             check("Invalid count answer shows a message", ok, f"{m} (both screens asking): message {alert!r}" + (f", error {errs[0]!r}" if errs else ""))
         for m in ("table", "count"):
             go(page, m); panel(page).locator("#rc").fill("0"); panel(page).locator("#tc").fill("0")
-            panel(page).locator("form.check button[type=submit]").click()
+            panel(page).locator(".check button.btn.primary").click()
         check("No network requests", not page._net, f"blocked requests: {page._net[:5]}" if page._net else "none attempted")
         page.context.close()
 
@@ -566,9 +614,11 @@ def main():
         page = new_page(browser, mobile=True, clock=True)
         for rs in ((1, True), (6, False)):
             set_rules(page, *rs)
-            for mode in ("learn", "quiz", "drill", "count", "table"):
+            for mode in ("learn", "quiz", "drill", "count", "table", "math"):
                 go(page, mode); n0 = len(page._errs)
-                if mode == "quiz":
+                if mode == "math":
+                    run_math(page, rs)
+                elif mode == "quiz":
                     run_quiz(page, rs, 10)
                     show = panel(page).get_by_role("button", name=re.compile("Show the full chart"))
                     if show.count(): show.click()
