@@ -1,0 +1,40 @@
+{
+  "_sources": [
+    "Hi-Lo values, running count, true count, rough estimating: https://wizardofodds.com/games/blackjack/card-counting/high-low/",
+    "Why a deck rich in tens and aces helps the player; counting is legal but casinos can bar counters: https://wizardofodds.com/games/blackjack/card-counting/introduction/",
+    "Chart codes and what they mean: https://wizardofodds.com/games/blackjack/strategy/calculator/"
+  ],
+  "actions": {
+    "hit": "Take another card. You can keep hitting until you stand or go over 21 (bust). If you bust, you lose right away, even if the dealer busts later.",
+    "stand": "Keep your total and end your turn. The dealer then plays and must hit until reaching 17 or more. When the table is set to H17, the dealer also hits a soft 17 (like A,6).",
+    "double": "Double your bet and take exactly one more card. Your turn then ends. Only allowed on your first two cards, including after a split (but not on split aces).",
+    "split": "When your first two cards are a pair, turn them into two separate hands with equal bets. Each hand gets a second card and is played on its own. Split aces get only one more card each.",
+    "surrender": "Give up the hand and get half your bet back. Only allowed as your very first move on your first two cards, and not after a split."
+  },
+  "codes": {
+    "H": "If you stop here, this hand loses too often, so taking another card gives you the better chance overall, even when the card might bust you.",
+    "S": "Taking another card risks more than it gains. Often the dealer shows a weak card (2 through 6) and has to keep drawing to 17, so you let the dealer take the risk of busting.",
+    "D": "The odds are in your favor here, so you put more money on the table while you have the edge. One more card often gives you a strong total. If you can't double (for example, you already have 3 cards), hit instead.",
+    "Ds": "The odds favor you enough to double. If you can't double (for example, you already have 3 cards), standing is better than hitting.",
+    "P": "Splitting gives you two better starting hands than the pair is as one hand, or puts more money out against a weak dealer card.",
+    "Rh": "This hand is expected to lose more than half your bet on average against this dealer card, so giving up half now is the cheaper choice. If you can't surrender (it's only your first move on two cards), hit.",
+    "Rs": "This hand is expected to lose more than half your bet on average against this dealer card, so giving up half now is the cheaper choice. If you can't surrender, stand.",
+    "Rp": "This pair is expected to lose more than half your bet on average against this dealer card, so giving up half now is the cheaper choice. If you can't surrender, split."
+  },
+  "hilo_tutorial": [
+    "Card counting means keeping a running tally of the cards you've seen, so you know whether the cards still left are mostly high or mostly low. It's a math exercise in tracking how the deck changes as it's dealt.",
+    "Why it matters: when the cards left are rich in tens and aces, the player has the advantage. You get more blackjacks (paid 3 to 2), your doubles are more likely to end strong, and the dealer is more likely to bust when forced to hit 12 through 16. When the cards left are mostly small, the dealer has the advantage.",
+    "The Hi-Lo system gives every card a value. 2, 3, 4, 5, 6 = +1. 7, 8, 9 = 0. 10, J, Q, K, A = -1.",
+    "Start at 0 after each shuffle. Add each card's value as you see it. This total is the running count. Example: 4, 6, K, 2, 8 is +1 +1 -1 +1 +0 = +2.",
+    "Check yourself: one full deck has 20 low cards (+1) and 20 high cards (-1), so counting a whole deck always ends at 0.",
+    "Tip: a high card and a low card cancel each other out. Look for those pairs to count faster.",
+    "A higher count means more high cards are left, which is better for you. Counting is legal if you only use your head, but casinos can ask counters to stop playing."
+  ],
+  "true_count": [
+    "The same running count means more when fewer cards are left. A +6 with 1 deck left is a big deal. A +6 with 6 decks left is not.",
+    "True count = running count ÷ decks left. Example: running count +6 with 3 decks left is a true count of +2. With 6 decks left, it's +1.",
+    "Estimate decks left by looking at how many cards have been played. A rough estimate is fine. Round the result to the nearest whole number.",
+    "With less than 1 deck left, dividing makes the number bigger. A running count of +2 with half a deck left is a true count of +4.",
+    "The higher the true count, the more the cards left favor you. That's the moment card counters raise their bets."
+  ]
+}
