@@ -36,7 +36,18 @@
     }
     return el;
   }
-  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+  // Empties el before a re-render. Holds el's height and the scroll position for one frame
+  // so the page doesn't collapse and jump to the top while the new content is built.
+  function clear(el) {
+    var y = window.scrollY, hgt = el.offsetHeight;
+    if (hgt) el.style.minHeight = hgt + "px";
+    while (el.firstChild) el.removeChild(el.firstChild);
+    if (hgt) requestAnimationFrame(function () {
+      el.style.minHeight = "";
+      if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);
+    });
+    return el;
+  }
   function rand(n) { return Math.floor(Math.random() * n); }
   function pick(arr) { return arr[rand(arr.length)]; }
   function fmt(n) { var r = Math.round(n * 10) / 10 || 0; return (r > 0 ? "+" : "") + r; } // || 0 turns -0 into 0
@@ -79,8 +90,9 @@
   // Wires a count form: checks every field parses before calling done(values...).
   function countForm(fields, done, extraTop) {
     var err = h("p", { class: "wrong small", role: "alert" });
-    var form = h("form", { class: "check", novalidate: "novalidate", onsubmit: function (e) {
-      e.preventDefault();
+    // Checked from a click/Enter handler rather than a form submit: previews that sandbox the
+    // page without form permission (like the in-chat preview) silently block submits.
+    function check() {
       for (var i = 0; i < fields.length; i++) {
         if (isNaN(parseCount(fields[i].input.value))) {
           err.textContent = "Enter a number for " + fields[i].input.labels[0].textContent.split(" (")[0].toLowerCase() + ", like 3, -2 or +1.";
@@ -89,10 +101,15 @@
         }
       }
       done.apply(null, fields.map(function (f) { return parseCount(f.input.value); }));
-    } }, extraTop || null);
-    fields.forEach(function (f) { f.el.forEach(function (x) { form.appendChild(x); }); });
+    }
+    var form = h("div", { class: "check", role: "group", "aria-label": "Check your count" }, extraTop || null);
+    fields.forEach(function (f) {
+      f.input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); check(); } });
+      f.input.setAttribute("enterkeyhint", "done");
+      f.el.forEach(function (x) { form.appendChild(x); });
+    });
     form.appendChild(err);
-    form.appendChild(h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn primary", type: "submit" }, "Check")));
+    form.appendChild(h("div", { class: "row", style: "margin-top:10px" }, h("button", { class: "btn primary", type: "button", onclick: check }, "Check")));
     setTimeout(function () {
       // On a phone the form can sit below the table; bring it into view before asking.
       if (window.innerWidth < 760 && form.scrollIntoView) form.scrollIntoView({ block: "center", behavior: "smooth" });
