@@ -124,3 +124,44 @@ test("bots: close-call mistakes only on close calls, and only to allowed plays",
   assert.equal(mk("10 7", "4"), null);          // stand hard 17: obvious
   assert.equal(mk("10 2", "9", { ...all, stand: false }), null); // alternative not allowed
 });
+
+test("index plays: Illustrious 18 and Fab 4 against the real 6D S17 chart", () => {
+  const path = require("path"), fs = require("fs");
+  const csv = fs.readFileSync(path.join(__dirname, "../data/strategy/6deck_s17.csv"), "utf8").split("\n").filter((l) => l && !l.startsWith("#"));
+  const UPS = csv[0].split(",").slice(1), table = {};
+  for (const l of csv.slice(1)) { const r = l.split(","); table[r[0]] = Object.fromEntries(UPS.map((u, i) => [u, r[i + 1]])); }
+  const charts = { "6deck_s17": { meta: {}, table } };
+  const r6 = BJ.makeRules({ decks: 6, h17: false }), r6h = BJ.makeRules({ decks: 6, h17: true });
+  const all = { hit: true, stand: true, double: true, split: true, surrender: true };
+  const go = (cards, up, tc, allowed = all, rules = r6) => {
+    const hd = hand(cards); return S.recommendWithCount(charts, rules, hd, c(up), { ...allowed, split: allowed.split && hd.isPair() }, tc);
+  };
+  assert.equal(go("10 6", "10", 1, { ...all, surrender: false }).action, "stand");   // 16 v 10, no surrender, TC >= 0
+  assert.equal(go("10 6", "10", -1, { ...all, surrender: false }).action, "hit");
+  assert.equal(go("10 6", "10", 3).action, "surrender");                             // basic surrender kept (not a Fab 4 hand)
+  assert.equal(go("10 5", "10", 1).action, "surrender");                             // Fab 4: 15 v 10 at 0
+  assert.equal(go("10 5", "10", -1).action, "hit");
+  assert.equal(go("10 4", "10", 3).action, "surrender");                             // Fab 4: 14 v 10 at +3
+  assert.equal(go("10 4", "10", 2).action, "hit");
+  assert.equal(go("6 5", "A", 1.2).action, "double");                                // 11 v A at +1
+  assert.equal(go("6 5", "A", 0.2).action, "hit");
+  assert.equal(go("10 10", "6", 4).action, "split");                                 // tens v 6 at +4
+  assert.equal(go("K Q", "5", 4).action, "stand");                                   // tens v 5 needs +5
+  assert.equal(go("10 2", "4", -0.6).action, "hit");                                 // 12 v 4 at 0
+  assert.equal(go("10 2", "4", 0.1).action, "stand");
+  assert.equal(go("10 3", "2", -1).action, "stand");                                 // 13 v 2 at -1
+  assert.equal(go("10 3", "2", -1.6).action, "hit");
+  assert.equal(go("5 4", "7", 3).action, "double");                                  // 9 v 7 at +3
+  assert.equal(go("5 2 2", "7", 3, { ...all, double: false }).action, "hit");        // can't double: basic
+  assert.equal(go("6 5", "A", 0.8).either, true);                                    // within half a count
+  assert.equal(go("6 5", "A", 0.2).either, false);
+  assert.equal(S.indexPlaysApply(r6h), false);                                     // H17: indices not used
+  assert.equal(S.indexPlaysApply(BJ.makeRules({ decks: 2, h17: false })), false);
+  assert.equal(S.INDEX_PLAYS.length, 21);
+});
+
+test("app.js parses (catches syntax errors the unit tests can't load)", () => {
+  const fs = require("fs"), path = require("path");
+  for (const f of ["app.js", "engine.js", "strategy.js", "math.js"])
+    assert.doesNotThrow(() => new Function(fs.readFileSync(path.join(__dirname, "../src", f), "utf8")), f);
+});

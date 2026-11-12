@@ -564,7 +564,7 @@
     this.others = st.others; this.seatPos = st.seatPos;
     this.shoe = new BJ.Shoe(r.decks); this.counter = new BJ.Counter();
     this.session = { start: st.bank, bank: st.bank, min: st.min, max: st.min * SIM.maxUnits, bet: st.min,
-      hands: [], strategy: [], insurance: [], decisions: 0, end: null, finalGuess: null, rules: S.ruleSetLabel(r), decks: r.decks };
+      hands: [], strategy: [], insurance: [], decisions: 0, indexChances: 0, indexRight: 0, indexOn: S.indexPlaysApply(r), end: null, finalGuess: null, rules: S.ruleSetLabel(r), decks: r.decks };
     this.phase = "play"; this.round = null; this.msg = "";
     this.render();
   };
@@ -615,11 +615,17 @@
     var ok = this.allowedNow();
     if (!ok[action]) return;
     var hand = rd.current(), up = rd.dealer.cards[0], ses = this.session;
-    var rec = S.recommend(CHARTS, rules(), hand, up, ok);
+    // Six decks, S17: basic strategy adjusted by the index plays for the count right now.
+    var tc = this.counter.trueCount(this.shoe);
+    var rec = S.recommendWithCount(CHARTS, rules(), hand, up, ok, tc);
     ses.decisions++;
-    if (rec && rec.action !== action)
+    if (rec && rec.idx && rec.action !== rec.basic) {
+      ses.indexChances++;
+      if (action === rec.action || (rec.either && action === rec.other)) ses.indexRight++;
+    }
+    if (rec && rec.action !== action && !(rec.either && action === rec.other))
       ses.strategy.push({ n: ses.hands.length, cards: hand.cards.slice(), up: up, total: totalText(hand), did: action, should: rec.action,
-        code: rec.code, tc: this.counter.trueCount(this.shoe) });
+        code: rec.code, tc: tc, idx: rec.idx, basic: rec.basic });
     rd.act(action);
     this.afterMove();
   };
@@ -863,16 +869,21 @@
         "How closely your bets followed the true count: " + A.corr.toFixed(2) + " (1.00 = your bet rose exactly with the count, 0 = no relationship; calculated here)." })));
 
     root.appendChild(h("section", { class: "math-sec" }, h("h3", { text: "Strategy" }),
-      h("p", { text: ses.strategy.length ? "Strategy blunders: " + ses.strategy.length + " of " + ses.decisions + " decisions didn't match basic strategy." :
-        (ses.decisions ? "All " + ses.decisions + " of your decisions matched basic strategy." : "You didn't make any playing decisions.") })));
+      h("p", { text: ses.strategy.length ? "Strategy blunders: " + ses.strategy.length + " of " + ses.decisions + " decisions weren't the best play." :
+        (ses.decisions ? "All " + ses.decisions + " of your decisions were the best play." : "You didn't make any playing decisions.") }),
+      h("p", { class: "small", text: ses.indexOn ?
+        (ses.indexChances ? "Index plays: the count called for a different play than basic strategy " + ses.indexChances + (ses.indexChances === 1 ? " time" : " times") + ", and you made it " + ses.indexRight + "." :
+          "The count never called for an index play this session.") :
+        "Index plays aren't graded with these rules (they're published for 6 decks with the dealer standing on soft 17), so this compares against basic strategy." })));
 
     var KIND = { noEdge: "Raised with no edge", missed: "Stayed at the minimum with an edge", risky: "Risky bet", strategy: "Strategy",
       insNoEdge: "Insurance below +3", insMissed: "Skipped insurance at +3 or more" };
     function describe(b) {
       if (b.kind === "strategy") {
         var s = b.s;
-        return [s.cards.map(function (c) { return c.rank; }).join(", ") + " (" + s.total + ") vs dealer " + BJ.upcardKey(s.up) + ". You chose " + ACTION_LABEL[s.did].toLowerCase() + ".",
-          "Basic strategy: " + S.CODE_NAMES[s.code].toLowerCase() + "."];
+        var what = s.cards.map(function (c) { return c.rank; }).join(", ") + " (" + s.total + ") vs dealer " + BJ.upcardKey(s.up) + " at a true count of " + tcText(s.tc) + ". You chose " + ACTION_LABEL[s.did].toLowerCase() + ".";
+        if (s.idx) return [what, ACTION_LABEL[s.should] + ". " + S.describeIndex(s.idx) + (s.should !== s.basic ? " (Basic strategy alone says " + s.basic + ".)" : "")];
+        return [what, "Basic strategy: " + S.CODE_NAMES[s.code].toLowerCase() + "."];
       }
       if (b.kind === "insNoEdge") return ["Took insurance at a true count of " + tcText(b.ins.tc) + ".", "Decline insurance below +3. Not enough tens are left for it to pay."];
       if (b.kind === "insMissed") return ["Declined insurance at a true count of " + tcText(b.ins.tc) + ".", "Take insurance at +3 or higher. Enough tens are left that it pays."];
@@ -925,7 +936,7 @@
         h("li", null, "Insurance (six decks only): take it at a true count of +3 or higher. That's the first of the Illustrious 18 index plays from Don Schlesinger's Blackjack Attack, as listed by ",
           link("https://www.blackjackinfo.com/card-counting/illustrious-18/", "BlackjackInfo"), " and ",
           link("https://www.countingedge.com/blackjack-players/don-schlesinger/the-illustrious-18-card-counting-indices/", "CountingEdge"), "."),
-        h("li", { text: "Strategy blunders compare your play with the basic strategy chart for these rules. Count-based index plays aren't graded." }))));
+        h("li", null, "Strategy blunders compare your play with the basic strategy chart for these rules. With 6 decks and the dealer standing on soft 17, the Illustrious 18 and Fab 4 index plays (same sources as insurance) replace basic strategy when the count calls for them; within half a point of an index, either play counts. Other rule sets use basic strategy only, because these index numbers are for 6 decks, S17."))));
 
     root.appendChild(h("div", { class: "row" },
       h("button", { class: "btn primary", type: "button", onclick: function () { self.start(); } }, "Play again"),
@@ -939,6 +950,24 @@
   Quiz.prototype.reset = function (note) { this.note = note || ""; this.answer = null; this.next(); };
   Quiz.prototype.next = function () {
     var tens = ["10", "J", "Q", "K"];
+    this.tc = null;
+    if (this.focus === "index" && S.indexPlaysApply(rules())) {
+      // An index hand, with a true count near its index so both sides of it come up.
+      var e = pick(S.INDEX_PLAYS), sut = function () { return pick(BJ.SUITS); };
+      var total = parseInt(e.row.slice(1), 10), cards;
+      if (e.row === "P10") cards = [pick(tens), pick(tens)];
+      else {
+        var opts = [];
+        for (var x = 2; x <= 10; x++) { var y = total - x; if (y >= 2 && y <= 10 && x !== y) opts.push([x, y]); }
+        var pr = pick(opts); cards = [String(pr[0]), pr[1] === 10 ? pick(tens) : String(pr[1])];
+      }
+      this.hand = new BJ.Hand(cards.map(function (r) { return { rank: r, suit: sut() }; }));
+      this.up = { rank: e.up === "10" ? pick(tens) : e.up, suit: sut() };
+      this.tc = Math.round((e.index + (Math.random() * 6 - 3)) * 10) / 10;
+      this.answer = null;
+      this.render();
+      return;
+    }
     var cat = this.focus === "all" ? pick(["hard", "hard", "soft", "pair"]) : this.focus;
     var a, b;
     if (cat === "pair") {
@@ -958,9 +987,11 @@
   };
   Quiz.prototype.choose = function (action) {
     if (this.answer) return;
-    var rec = S.recommend(CHARTS, rules(), this.hand, this.up, { hit: true, stand: true, double: true, split: this.hand.isPair(), surrender: true });
+    var allowed = { hit: true, stand: true, double: true, split: this.hand.isPair(), surrender: true };
+    var rec = this.tc == null ? S.recommend(CHARTS, rules(), this.hand, this.up, allowed)
+      : S.recommendWithCount(CHARTS, rules(), this.hand, this.up, allowed, this.tc);
     if (!rec) return;
-    var good = rec.action === action;
+    var good = rec.action === action || (rec.either && rec.other === action);
     this.stats.n++; if (good) { this.stats.right++; this.stats.streak++; } else this.stats.streak = 0;
     this.answer = { rec: rec, did: action, good: good };
     this.render();
@@ -976,17 +1007,21 @@
     var help = h("section", { class: "intro drill-help", "aria-label": "How this mode works" },
       h("h3", { text: "How this mode works" }),
       h("p", { text: "Basic strategy is the mathematically best play for every hand you can be dealt against every dealer upcard. It changes slightly with the number of decks and the soft 17 rule, so the quiz follows your settings above." }),
-      h("p", { text: "Pick a move for each hand. You'll see the right play and why, and you can open the full chart below your score." }));
+      h("p", { text: "Pick a move for each hand. You'll see the right play and why, and you can open the full chart below your score." }),
+      h("p", { text: "Index plays are the count-based exceptions to basic strategy: at a high enough (or low enough) true count, the best play changes. Practice them with the last option in the menu. They're the Illustrious 18 and Fab 4 from Don Schlesinger's Blackjack Attack, published for 6 decks with the dealer standing on soft 17. Within half a point of an index, either play counts." }));
     if (this.note) root.appendChild(h("p", { class: "muted small", text: this.note }));
     if (!CHARTS[S.ruleSetKey(r)]) { root.appendChild(chartMissingNotice(r)); root.appendChild(help); return; }
 
     var focus = h("select", { "aria-label": "Hands to practice", onchange: function (e) { self.focus = e.target.value; self.next(); } },
-      [["all", "All hands"], ["hard", "Hard totals"], ["soft", "Soft totals (with an ace)"], ["pair", "Pairs"]].map(function (o) {
+      [["all", "All hands"], ["hard", "Hard totals"], ["soft", "Soft totals (with an ace)"], ["pair", "Pairs"], ["index", "Index plays: count-based exceptions (6 decks, dealer stands)"]].map(function (o) {
         return h("option", { value: o[0], selected: o[0] === self.focus ? "selected" : null }, o[1]);
       }));
     root.appendChild(h("p", { class: "row small" }, "Practice ", focus));
+    if (this.focus === "index" && !S.indexPlaysApply(r))
+      root.appendChild(h("p", { class: "notice", text: "The index numbers are published for 6 decks with the dealer standing on soft 17. Switch the settings above to 6 decks and Stands to practice them; until then you'll get regular hands." }));
 
     root.appendChild(h("div", { class: "panel" },
+      this.tc != null ? h("p", { class: "quiz-tc" }, "True count ", h("b", { class: "num", text: fmt(this.tc) })) : null,
       h("div", { class: "quiz-hand" },
         h("section", { class: "spot" }, h("h3", null, "Dealer shows"), h("div", { class: "cards" }, cardEl(this.up))),
         h("section", { class: "spot" }, h("h3", null, "You have", h("span", { class: "total", text: totalText(this.hand) })),
@@ -1013,6 +1048,9 @@
     return h("div", { class: "feedback", "aria-live": "polite" },
       h("p", null, A.good ? h("span", { class: "right", text: "Correct. " }) : h("span", { class: "wrong", text: "Not quite. " }),
         "The right play is ", h("span", { class: "hl", text: ACTION_LABEL[A.rec.action] }), "."),
+      A.rec.idx ? h("p", { class: "small", text: S.describeIndex(A.rec.idx) + " The true count is " + fmt(this.tc) + "." +
+        (A.rec.either ? " That's within half a point of the index, so " + ACTION_LABEL[A.rec.other].toLowerCase() + " also counts." : "") +
+        (A.rec.action !== A.rec.basic ? " Basic strategy alone would say " + ACTION_LABEL[A.rec.basic].toLowerCase() + "." : "") }) :
       h("p", { class: "small", text: whyText(A.rec) + " (Chart row " + A.rec.row + ", dealer " + A.rec.col + ".)" }),
       h("button", { class: "btn primary", onclick: function () { self.next(); } }, "Next hand", h("kbd", { text: "N" })));
   };
