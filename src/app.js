@@ -787,6 +787,24 @@
     root.appendChild(h("div", { class: "panel" }, form));
   };
 
+  // Save the summary as a standalone web page (opens in any browser, offline).
+  SimGame.prototype.download = function () {
+    var copy = this.root.cloneNode(true);
+    copy.querySelectorAll("button").forEach(function (b) { b.remove(); });
+    copy.querySelectorAll("details").forEach(function (d) { d.setAttribute("open", ""); });
+    var css = (document.querySelector("style") || {}).textContent || "";
+    var when = new Date(), pad = function (n) { return (n < 10 ? "0" : "") + n; };
+    var stamp = when.getFullYear() + "-" + pad(when.getMonth() + 1) + "-" + pad(when.getDate()) + " " + pad(when.getHours()) + ":" + pad(when.getMinutes());
+    var html = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+      "<title>Bet the count summary " + stamp + "</title><style>" + css + "</style></head><body><main>" +
+      "<p class=\"muted small\">Blackjack Count Trainer: Bet the count session summary, saved " + stamp + ".</p>" + copy.innerHTML + "</main></body></html>";
+    var blob = new Blob([html], { type: "text/html" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "bet-the-count-summary-" + stamp.replace(/[ :]/g, "-") + ".html";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  };
   SimGame.prototype.analyze = function () {
     var ses = this.session, out = { noEdge: 0, missed: 0, risky: 0, wagered: 0, biggest: 0, blunders: [] };
     ses.hands.forEach(function (x) {
@@ -948,6 +966,7 @@
         h("li", null, "Strategy blunders compare your play with the basic strategy chart for these rules. With 6 decks and the dealer standing on soft 17, the Illustrious 18 and Fab 4 index plays (same sources as insurance) replace basic strategy when the count calls for them; within half a point of an index, either play counts. Other rule sets use basic strategy only, because these index numbers are for 6 decks, S17."))));
 
     root.appendChild(h("div", { class: "row" },
+      h("button", { class: "btn", type: "button", onclick: function () { self.download(); } }, "Download summary"),
       h("button", { class: "btn primary", type: "button", onclick: function () { self.start(); } }, "Play again"),
       h("button", { class: "btn", type: "button", onclick: function () { self.session = null; self.phase = "setup"; self.render(); } }, "Change setup")));
   };
