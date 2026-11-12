@@ -130,7 +130,12 @@
     rec.idx = null; rec.either = false; rec.basic = rec.action;
     if (!indexPlaysApply(rules) || hand.isSoft()) return rec;
     var up = BJ.upcardKey(dealerUp), total = "H" + hand.total();
-    var pairRow = allowed.split && hand.isPair() && BJ.cardValue(hand.cards[0]) === 10 ? "P10" : null;
+    // A pair that can be split is played from the pair chart. Only tens have index plays
+    // (P10 rows); any other splittable pair keeps basic strategy rather than falling through to
+    // the hard-total indices (8,8 vs 10 must stay a split, not become "16 vs 10").
+    var splittable = allowed.split && hand.isPair();
+    if (splittable && BJ.cardValue(hand.cards[0]) !== 10) return rec;
+    var pairRow = splittable ? "P10" : null;
     function find(set, row) {
       for (var i = 0; i < INDEX_PLAYS.length; i++) {
         var e = INDEX_PLAYS[i];
@@ -138,7 +143,7 @@
       }
       return null;
     }
-    var e = allowed.surrender ? find("Fab4", total) : null;
+    var e = allowed.surrender && !pairRow ? find("Fab4", total) : null;
     if (!e && rec.action === "surrender") return rec;
     if (!e && pairRow) e = find("I18", pairRow);
     if (!e && !pairRow) e = find("I18", total);

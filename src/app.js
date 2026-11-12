@@ -822,8 +822,10 @@
     // Insurance, six decks only: the Hi-Lo index is +3 (Illustrious 18 #1, six decks).
     ses.insurance.forEach(function (x) {
       if (!x.graded) return;
-      if (x.took && tenth(x.tc) < 3) out.blunders.push({ n: x.n, kind: "insNoEdge", ins: x });
-      if (!x.took && tenth(x.tc) >= 3) out.blunders.push({ n: x.n, kind: "insMissed", ins: x });
+      // Same convention as the index plays: exact true count, and within half a point of the
+      // index either choice counts (Jenna's agent's review of #22/#24).
+      if (x.took && x.tc <= 2.5) out.blunders.push({ n: x.n, kind: "insNoEdge", ins: x });
+      if (!x.took && x.tc >= 3.5) out.blunders.push({ n: x.n, kind: "insMissed", ins: x });
     });
     out.blunders.sort(function (a, b) { return a.n - b.n; });
     out.corr = pearson(ses.hands.map(function (x) { return x.tc; }), ses.hands.map(function (x) { return x.bet; }));
@@ -923,7 +925,7 @@
       var took = ses.insurance.filter(function (x) { return x.took; }).length;
       root.appendChild(h("section", { class: "math-sec" }, h("h3", { text: "Insurance" }),
         h("p", { text: "The dealer showed an ace " + ses.insurance.length + (ses.insurance.length === 1 ? " time" : " times") + " and you took insurance " + took + (took === 1 ? " time." : " times.") +
-          (ses.decks === 6 ? " Graded by the Hi-Lo index: take it at a true count of +3 or higher." :
+          (ses.decks === 6 ? " Graded by the Hi-Lo index: take it at a true count of +3 or higher (within half a point of +3, either choice counts)." :
             " With " + ses.decks + (ses.decks === 1 ? " deck" : " decks") + " this isn't graded, because the +3 index is for six decks. The table shows whether it actually paid from the cards left.") }),
         h("div", { class: "chart-wrap" }, h("table", { class: "chart math-table" },
           h("thead", null, h("tr", null, ["Hand", "True count", "You", "Chance hole card is a ten", "Value of insurance", "Dealer had blackjack"].map(function (c) { return h("th", { scope: "col", text: c }); }))),

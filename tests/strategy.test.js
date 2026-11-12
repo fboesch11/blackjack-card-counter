@@ -165,3 +165,24 @@ test("app.js parses (catches syntax errors the unit tests can't load)", () => {
   for (const f of ["app.js", "engine.js", "strategy.js", "math.js"])
     assert.doesNotThrow(() => new Function(fs.readFileSync(path.join(__dirname, "../src", f), "utf8")), f);
 });
+
+test("index plays: splittable pairs other than tens keep basic strategy (Jenna's agent's #24 review)", () => {
+  const path = require("path"), fs = require("fs");
+  const csv = fs.readFileSync(path.join(__dirname, "../data/strategy/6deck_s17.csv"), "utf8").split("\n").filter((l) => l && !l.startsWith("#"));
+  const UPS = csv[0].split(",").slice(1), table = {};
+  for (const l of csv.slice(1)) { const r = l.split(","); table[r[0]] = Object.fromEntries(UPS.map((u, i) => [u, r[i + 1]])); }
+  const charts = { "6deck_s17": { meta: {}, table } };
+  const r6 = BJ.makeRules({ decks: 6, h17: false });
+  const all = { hit: true, stand: true, double: true, split: true, surrender: true };
+  const go = (cards, up, tc, allowed = all) => S.recommendWithCount(charts, r6, hand(cards), c(up), allowed, tc);
+  for (const tc of [-3, 0, 2, 6]) {
+    assert.equal(go("8 8", "10", tc).action, "split", "8,8 v 10 at " + tc);
+    assert.equal(go("8 8", "9", tc).action, "split", "8,8 v 9 at " + tc);
+    for (const up of ["2", "3", "4", "5", "6"]) assert.equal(go("6 6", up, tc).action, "split", "6,6 v " + up + " at " + tc);
+    assert.equal(go("7 7", "10", tc).idx, null, "7,7 v 10 gets no Fab 4 surrender");
+  }
+  // Once a pair can't be split any more it's a hard total, and the hard-total index applies.
+  assert.equal(go("8 8", "10", 1, { ...all, split: false, surrender: false }).action, "stand");
+  // Tens still use their own index.
+  assert.equal(go("10 10", "6", 4.2).action, "split");
+});
