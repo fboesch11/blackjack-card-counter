@@ -380,7 +380,7 @@
         rd ? "Deal next hand" : "Deal", h("kbd", { text: "N" })));
     }
 
-    var main = h("div", null, dealer, player, actions, h("p", { class: "msg", "aria-live": "polite", text: this.msg }));
+    var main = h("div", null, h("div", { class: "felt" }, dealer, player), actions, h("p", { class: "msg", "aria-live": "polite", text: this.msg }));
     if (o.coach) main.appendChild(this.renderCoach());
     if (o.coach && playing) main.appendChild(h("ul", { class: "help-list" }, ACTIONS.map(function (a) {
       return h("li", null, h("b", { text: ACTION_LABEL[a] + ": " }), ACTION_HELP[a]);
@@ -744,7 +744,7 @@
     } else if (rd && rd.phase === "insurance") {
       actions.appendChild(this.insurancePrompt(money(rd.seatHands(rd.userSeat)[0].bet / 2), this.canInsure()));
     }
-    var main = h("div", null, t.dealer, t.seats, actions, h("p", { class: "msg", "aria-live": "polite", text: this.msg }));
+    var main = h("div", null, h("div", { class: "felt" }, t.dealer, t.seats), actions, h("p", { class: "msg", "aria-live": "polite", text: this.msg }));
     if (this.betting()) main.appendChild(this.renderBet());
 
     var used = 1 - this.shoe.remaining() / this.shoe.total;
@@ -763,7 +763,7 @@
     var self = this, ses = this.session, prob = this.betProblem();
     // Casino chip values at or above the table minimum.
     var chips = [ses.min, 25, 100, 500].filter(function (v, i, a) { return v >= ses.min && a.indexOf(v) === i; }).map(function (v) {
-      return h("button", { class: "btn chip", type: "button", onclick: function () { self.setBet(ses.bet + v); } }, "+" + money(v));
+      return h("button", { class: "btn chip chip-" + v, type: "button", onclick: function () { self.setBet(ses.bet + v); } }, "+" + money(v));
     });
     return h("div", { class: "panel bet-panel" },
       h("p", { class: "bet-line" }, "Your bet ", h("b", { class: "num", text: money(ses.bet) })),
@@ -1053,7 +1053,7 @@
 
     root.appendChild(h("div", { class: "panel" },
       this.tc != null ? h("p", { class: "quiz-tc" }, "True count ", h("b", { class: "num", text: fmt(this.tc) })) : null,
-      h("div", { class: "quiz-hand" },
+      h("div", { class: "quiz-hand felt" },
         h("section", { class: "spot" }, h("h3", null, "Dealer shows"), h("div", { class: "cards" }, cardEl(this.up))),
         h("section", { class: "spot" }, h("h3", null, "You have", h("span", { class: "total", text: totalText(this.hand) })),
           h("div", { class: "cards" }, this.hand.cards.map(function (c) { return cardEl(c); })))),
