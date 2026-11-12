@@ -102,7 +102,8 @@ STATE_JS = r"""() => {
     playingText: (p.querySelector('.actions p')||{}).innerText||'',
     msg:(p.querySelector('.msg')||{}).innerText||'', coach:(p.querySelector('.coach')||{}).innerText||'',
     coachHl:(p.querySelector('.coach .hl')||{}).innerText||'',
-    pending: !!p.querySelector('.check [data-count=rc]'), side: side?side.innerText:''};
+    pending: !!p.querySelector('.check [data-count=rc]'), side: side?side.innerText:'',
+    insurance: !!p.querySelector('.insurance'), coachAll:(p.querySelector('.coach')||{}).innerText||''};
 }"""
 
 def new_page(browser, mobile=False, clock=False):
@@ -202,6 +203,19 @@ def play_table(page, mode, rs, rounds, tr, *, coach=False, clock=False, seat=Non
             guard += 1
             if guard > 400: issue(f"{where}: round never finished"); return False
             st = state(page)
+            if st.get("insurance"):
+                stat("insurance prompts (table modes)")
+                if coach:
+                    panel(page).get_by_role("button", name="What should I do?").click() if panel(page).get_by_role("button", name="What should I do?").count() else None
+                    hint = state(page)["coachAll"]
+                    if hint and "No insurance" not in hint:
+                        issue(f"{where}: insurance hint doesn't say 'No insurance': {hint[:100]!r}"); ok = False
+                panel(page).locator(".insurance").get_by_role("button", name=re.compile("No insurance")).click()
+                if coach:
+                    c = state(page)["coachAll"]
+                    if c and "Insurance loses money" not in c and "No insurance" not in c:
+                        issue(f"{where}: coach after declining insurance: {c[:100]!r}")
+                continue
             if "Hit" in st["btns"]:
                 user_turns += 1
                 hand, nhands = my_hand(st)
@@ -449,6 +463,14 @@ def run_sim(page, rs, hands=40, others=3):
             if units > 1: raised_then_shuffled += 1
         for _ in range(400):
             st = state(page)
+            if st.get("insurance"):
+                tc_now = tenth_js(tr.tc()) if tr.synced else 0
+                ins = P.locator(".insurance")
+                if rs[0] == 6 and tc_now >= 3 and tr.synced and ins.get_by_role("button", name=re.compile("Take insurance")).count():
+                    ins.get_by_role("button", name=re.compile("Take insurance")).click(); stat("sim insurance taken at +3 or more")
+                else:
+                    ins.get_by_role("button", name=re.compile("No insurance")).click(); stat("sim insurance declined")
+                continue
             if st["btns"].get("Stand") is not None and any(st["btns"].get(k) for k in LABEL):
                 hand, nh = my_hand(st)
                 allowed = {LABEL[k]: v for k, v in st["btns"].items() if k in LABEL}
@@ -479,6 +501,8 @@ def run_sim(page, rs, hands=40, others=3):
         issue(f"{where}: summary flags noEdge={n_noedge} missed={n_missed} risky={n_risky}; expected noEdge={raised_then_shuffled} (raises that met a shuffle) and 0 others"); ok = False
     if raised_then_shuffled:
         RESULTS.setdefault("sim_shuffle_flags", []).append(f"{where}: {raised_then_shuffled} correct raise(s) flagged 'raised with no edge' because the shuffle came after Deal")
+    if re.search(r"Insurance below \+3|Skipped insurance at \+3", txt):
+        issue(f"{where}: insurance played by the index but the summary lists an insurance blunder"); ok = False
     if tr.synced and "final running count was right" not in txt:
         issue(f"{where}: final running count {tr.rc} not accepted"); ok = False
     P.get_by_role("button", name=re.compile("New session|Play again|Start over|Back to setup")).first.click() if P.get_by_role("button", name=re.compile("New session|Play again|Start over|Back to setup")).count() else None
