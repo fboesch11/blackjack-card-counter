@@ -289,6 +289,7 @@
         this.stats.moves++;
         var good = rec.action === action;
         if (good) this.stats.movesRight++;
+        progressAdd("learn", { ok: good });
         this.coachMsg = { good: good, rec: rec, did: action, row: rec.row, col: rec.col };
       }
     }
@@ -340,6 +341,7 @@
     var shown = shownDecks(this.shoe);
     var tcOk = tcRight(tcVal, tc, rc, shown);
     this.stats.checks++; if (rcOk && tcOk) this.stats.checksRight++;
+    progressAdd(this.others ? "table" : "count", { ok: rcOk && tcOk, rcOk: rcOk, tcOk: tcOk });
     this.lastCheck = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal, shown: shown,
       decksLeft: this.shoe.decksRemaining() };
     this.pendingCheck = false;
@@ -843,6 +845,11 @@
   SimGame.prototype.renderSummary = function (root) {
     var self = this, ses = this.session, A = this.analyze();
     var link = function (u, t) { return h("a", { href: u, rel: "noopener", text: t }); };
+    if (!ses.saved) {
+      ses.saved = true;
+      progressAdd("sim", { ok: A.noEdge + A.missed + A.risky === 0, hands: ses.hands.length, net: Math.round((ses.bank - ses.start) * 100) / 100,
+        betBlunders: A.noEdge + A.missed + A.risky, strategyBlunders: ses.strategy.length });
+    }
     var why = { cashout: "You cashed out.", broke: "You ran out of money for the " + money(ses.min) + " minimum.", rules: "The table rules changed, so the session ended." }[ses.end];
     var net = ses.bank - ses.start;
     root.appendChild(h("p", { text: why + " Rules: " + ses.rules + "." }));
@@ -996,6 +1003,7 @@
     var good = rec.action === action || (rec.either && rec.other === action);
     this.stats.n++; if (good) { this.stats.right++; this.stats.streak++; } else this.stats.streak = 0;
     this.answer = { rec: rec, did: action, good: good };
+    progressAdd(this.tc == null ? "quiz" : "index", { ok: good });
     this.render();
   };
   Quiz.prototype.key = function (k) {
@@ -1115,6 +1123,7 @@
     var shown = shownDecks(this.shoe);
     var tcOk = !this.askTrue || this.done || tcRight(tcVal, tc, rc, shown);
     this.stats.n++; if (rcOk && tcOk) this.stats.right++;
+    progressAdd("drill", { ok: rcOk && tcOk, askTrue: this.askTrue });
     this.result = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal, final: this.done, left: this.shoe.decksRemaining(), shown: shown };
     this.pending = false;
     this.untilCheck = this.gap();
@@ -1347,14 +1356,84 @@
         ". Counting in pairs is suggested by ", h("a", { href: "https://www.lasvegasadvisor.com/blog/the-easy-red-7-count/", rel: "noopener", text: "Las Vegas Advisor" }), ".")));
   };
 
-  // Saved progress (F5 fills this in); until then results are kept for this visit only.
-  function progressAdd() {}
+  /* ---------- Saved progress (F5) ----------
+   * Kept in this browser on this device only (localStorage), so it works offline and nothing is
+   * sent anywhere. If the browser blocks storage (some private windows), progress just isn't kept.
+   * Shape: { kind: [{ t: time, ok, ...details }] }, newest last, at most 300 per kind. */
+  var PROGRESS_KEY = "bj.progress";
+  function progressAll() {
+    try { var v = JSON.parse(store(PROGRESS_KEY) || "{}"); return v && typeof v === "object" ? v : {}; } catch (e) { return {}; }
+  }
+  function progressAdd(kind, data) {
+    var all = progressAll(), list = all[kind] || [];
+    var rec = { t: Date.now() }; for (var k in data) rec[k] = data[k];
+    list.push(rec); if (list.length > 300) list = list.slice(-300);
+    all[kind] = list; store(PROGRESS_KEY, JSON.stringify(all));
+  }
+  function progressClear() { store(PROGRESS_KEY, "{}"); }
+  // Share right in the last n results of a kind, or null if none yet.
+  function recentRate(list, n) {
+    if (!list || !list.length) return null;
+    var last = list.slice(-n), ok = last.filter(function (x) { return x.ok; }).length;
+    return { ok: ok, n: last.length, pct: Math.round(ok / last.length * 100) };
+  }
 
   /* =================================================================
    * Modes and routing
    * ================================================================= */
+  /* ---------- Start here (F6): a suggested path, with saved progress on each step ----------
+   * The goals are this game's own suggestions for when to move on, not published standards. */
+  function startHere() {
+    var P = progressAll();
+    function rate(kind, n, goal) {
+      var r = recentRate(P[kind], n);
+      if (!r) return { text: "Not started", done: false };
+      return { text: r.pct + "% right (last " + r.n + ")", done: r.n >= Math.min(n, 20) && r.pct >= goal };
+    }
+    var speedOk = (P.speed || []).filter(function (x) { return x.ok; });
+    var bestSpeed = speedOk.length ? Math.min.apply(null, speedOk.map(function (x) { return x.secs; })) : null;
+    var simClean = (P.sim || []).filter(function (x) { return x.ok && x.hands >= 20; }).length;
+    var decks = P.decks || [], deckRate = recentRate(decks, 20);
+    var steps = [
+      ["learn", null, "Learn to play", "Play hands with the coach until the moves feel natural.", "Goal: 90% of your last 30 moves match basic strategy.", rate("learn", 30, 90)],
+      ["quiz", null, "Strategy quiz", "Drill basic strategy for your table rules.", "Goal: 90% of your last 50 answers.", rate("quiz", 50, 90)],
+      ["drill", "count", "Count drill: running count", "Keep the Hi-Lo count as cards flip by.", "Goal: 90% of your last 20 checks.", rate("drill", 20, 90)],
+      ["drill", "decks", "Count drill: decks left", "Estimate decks left from the discard tray.", "Goal: 80% within half a deck, last 20.",
+        deckRate ? { text: deckRate.pct + "% within half a deck (last " + deckRate.n + ")", done: deckRate.n >= 20 && deckRate.pct >= 80 } : { text: "Not started", done: false }],
+      ["drill", "speed", "Count drill: speed run", "Count down a deck against the clock.", "Goal: a correct deck in under 30 seconds.",
+        bestSpeed == null ? { text: (P.speed || []).length ? "No correct run yet" : "Not started", done: false } : { text: "Best correct run: " + bestSpeed.toFixed(1) + " s", done: bestSpeed < 30 }],
+      ["count", null, "Count while playing", "Keep the count during real hands, then the true count.", "Goal: 85% of your last 20 checks.", rate("count", 20, 85)],
+      ["table", null, "Full table practice", "Count everyone's cards at a busy table.", "Goal: 85% of your last 20 checks.", rate("table", 20, 85)],
+      ["quiz", "index", "Index plays", "Learn when the count changes the right play (6 decks, dealer stands).", "Goal: 85% of your last 30.", rate("index", 30, 85)],
+      ["sim", null, "Bet the count", "Put it together: bet more when the count favors you.", "Goal: a 20+ hand session with no betting blunders.",
+        (P.sim || []).length ? { text: simClean + " clean session" + (simClean === 1 ? "" : "s") + " of " + P.sim.length, done: simClean > 0 } : { text: "Not started", done: false }]
+    ];
+    var list = h("ol", { class: "path" }, steps.map(function (st) {
+      return h("li", { class: st[5].done ? "done" : null },
+        h("div", null, h("b", { text: st[2] }), " ", h("span", { class: "small muted", text: st[3] })),
+        h("div", { class: "small" }, h("span", { class: st[5].done ? "right" : null, text: (st[5].done ? "✓ " : "") + st[5].text + "." }), " ", h("span", { class: "muted", text: st[4] })),
+        h("button", { class: "btn", type: "button", onclick: function () { goTo(st[0], st[1]); } }, "Go"));
+    }));
+    return h("details", { class: "start-here panel", open: store("bj.pathClosed") === "1" ? null : "open",
+      ontoggle: function (e) { store("bj.pathClosed", e.target.open ? "0" : "1"); } },
+      h("summary", { text: "Start here: your path from beginner to counting cards" }),
+      list,
+      h("p", { class: "small muted", text: "The goals are this game's own suggestions for when to move on. Your progress is saved in this browser on this device only." }),
+      h("p", { class: "small muted" }, "The math tab explains why all of this works, any time you're curious. ",
+        h("button", { class: "btn", type: "button", onclick: function () {
+          progressClear(); var c = instances.learn; if (c) c.render(); } }, "Clear my progress")));
+  }
+  // Open a tab (and a drill or quiz option inside it).
+  function goTo(mode, sub) {
+    show(mode);
+    var inst = instances[mode];
+    if (mode === "drill" && sub && inst.show) inst.show(sub);
+    if (mode === "quiz" && sub && inst.focus !== sub) { inst.focus = sub; inst.next(); }
+    window.scrollTo(0, 0);
+  }
   function learnIntro() {
     return h("div", { class: "intro" },
+      startHere(),
       h("h2", { text: "Learn to play" }),
       h("p", { text: "Get closer to 21 than the dealer without going over. Number cards are worth their number, J, Q and K are worth 10, and an ace is worth 11 or 1, whichever helps. A hand with an ace counted as 11 is called soft." }),
       h("p", { text: "The dealer has to hit until reaching 17 or more. Press Deal, and after each move the coach tells you whether it matches basic strategy." }));
