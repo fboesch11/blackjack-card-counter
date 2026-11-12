@@ -231,3 +231,5 @@ details.math-sec summary { cursor: pointer; font-weight: 600; min-height: 44px; 
 /* Insurance question */
 .insurance { border: 1.5px solid var(--ink); border-radius: 10px; padding: 12px; background: var(--panel); }
 .insurance p { margin: 0 0 8px; }
+.quiz-tc { margin: 0 0 8px; font-size: 1.05rem; }
+.quiz-tc b { font: 700 1.4rem/1 var(--serif); margin-left: 6px; }
