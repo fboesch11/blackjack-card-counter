@@ -290,6 +290,7 @@ def play_table(page, mode, rs, rounds, tr, *, coach=False, clock=False, seat=Non
     return ok
 
 def do_check(page, mode, rs, tr, where):
+    settle_focus(page, "rc")
     st = state(page)
     m = re.search(r"About ([\d.]+) of (\d+) decks left", st["side"])
     shown_left = float(m.group(1)) if m else None
@@ -392,6 +393,11 @@ DRILL_JS = r"""() => {
     fb:(p.querySelector('.feedback')||{}).innerText||''};
 }"""
 
+def settle_focus(page, name):
+    """The game focuses the first answer box in a setTimeout(0) after showing the question.
+    Wait for that before typing, or a late focus can move our typing into the wrong box."""
+    page.wait_for_function("n => { const a = document.activeElement; return a && a.dataset && a.dataset.count === n; }", arg=name, timeout=3000)
+
 def run_drill(page, rs, use_pm=False, max_checks=None):
     where = f"drill {rs[0]}D-{'H17' if rs[1] else 'S17'}"
     ok = True
@@ -406,6 +412,7 @@ def run_drill(page, rs, use_pm=False, max_checks=None):
         if d["pending"]:
             final = dealt == total
             left = (total - dealt) / 52
+            settle_focus(page, "drc")
             if use_pm and rc < 0:
                 panel(page).locator(".check [data-count=drc]").fill(str(-rc))
                 panel(page).get_by_role("button", name="Flip the sign of Running count").click()
@@ -416,6 +423,11 @@ def run_drill(page, rs, use_pm=False, max_checks=None):
             elif not final: issue(f"{where}: true count box missing though 'Also ask the true count' is ticked")
             panel(page).locator(".check button.btn.primary").click()
             fb = page.evaluate(DRILL_JS)["fb"]
+            if not fb:
+                RESULTS.setdefault("drill_empty_fb", []).append(page.evaluate("""()=>{const p=[...document.querySelectorAll('[role=tabpanel]')].find(x=>!x.hidden);
+                  const c=p.querySelector('.check'); return {stillAsking:!!c, alert:c?(c.querySelector('[role=alert]')||{}).innerText:'',
+                  drc:c&&c.querySelector('[data-count=drc]')?c.querySelector('[data-count=drc]').value:null,
+                  dtc:c&&c.querySelector('[data-count=dtc]')?c.querySelector('[data-count=dtc]').value:null, stats:(p.querySelector('.stats')||{}).innerText}}"""))
             checks += 1; stat("drill count checks")
             if not fb.startswith("Right"):
                 issue(f"{where}: running count {rc} after {dealt} cards graded wrong: {fb[:120]!r}"); ok = False
@@ -464,7 +476,11 @@ def run_sim(page, rs, hands=40, others=3):
         for _ in range(400):
             st = state(page)
             if st.get("insurance"):
-                tc_now = tenth_js(tr.tc()) if tr.synced else 0
+                # the count at this moment includes this round's visible cards (dealer ace + every seat)
+                vis = [r for r in end_round_cards(st) if r]
+                rc_now = tr.rc + sum(hilo(r) for r in vis)
+                left_now = (52 * tr.decks - tr.dealt - len(vis) - 1) / 52   # -1: the hole card is out of the shoe
+                tc_now = tenth_js(rc_now / left_now) if tr.synced else 0
                 ins = P.locator(".insurance")
                 if rs[0] == 6 and tc_now >= 3 and tr.synced and ins.get_by_role("button", name=re.compile("Take insurance")).count():
                     ins.get_by_role("button", name=re.compile("Take insurance")).click(); stat("sim insurance taken at +3 or more")
