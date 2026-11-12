@@ -58,7 +58,18 @@
    * Halves round away from zero (1.5 → 2, −1.5 → −2). */
   function tenth(x) { return Math.round(x * 10) / 10 || 0; }
   function wholeTC(x) { var r = Math.sign(x) * Math.round(Math.abs(tenth(x))); return r || 0; }
-  function tcRight(userVal, exact) { return wholeTC(userVal) === wholeTC(exact); }
+  // Decks left as the game shows it: to the nearest half deck, never below half a deck.
+  function shownDecks(shoe) { return Math.max(0.5, Math.round(shoe.decksRemaining() * 2) / 2); }
+  // Right if it matches the exact true count, or the running count divided by the decks-left
+  // estimate shown on screen (Jenna's agent's review: players can only divide by what they see).
+  function tcRight(userVal, exact, rc, shown) {
+    return wholeTC(userVal) === wholeTC(exact) || (shown > 0 && wholeTC(userVal) === wholeTC(rc / shown));
+  }
+  // Extra note when the shown estimate gives a different whole number than the exact count.
+  function estimateNote(rc, shown, exact) {
+    var alt = wholeTC(rc / shown);
+    return alt === wholeTC(exact) ? "" : " Using the " + shown + (shown === 1 ? " deck" : " decks") + " shown, " + signed(alt) + " also counts as right.";
+  }
   // "+1.7, which rounds to +2" (or just "+2" when the tenth is already whole).
   function tcText(exact) {
     var t = tenth(exact), w = wholeTC(exact);
@@ -324,9 +335,10 @@
   TableGame.prototype.submitCheck = function (rcVal, tcVal) {
     var rc = this.counter.running, tc = this.counter.trueCount(this.shoe);
     var rcOk = rcVal === rc;
-    var tcOk = tcRight(tcVal, tc);
+    var shown = shownDecks(this.shoe);
+    var tcOk = tcRight(tcVal, tc, rc, shown);
     this.stats.checks++; if (rcOk && tcOk) this.stats.checksRight++;
-    this.lastCheck = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal,
+    this.lastCheck = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal, shown: shown,
       decksLeft: this.shoe.decksRemaining() };
     this.pendingCheck = false;
     this.render();
@@ -466,7 +478,7 @@
       h("div", { class: "small muted", text: "Discard tray (cards already played)" }),
       h("div", { class: "tray-bar", role: "img", "aria-label": Math.round(used * 100) + "% of the shoe played" },
         h("div", { class: "tray-fill", style: "width:" + (used * 100).toFixed(1) + "%" })),
-      h("div", { class: "small muted num", text: "About " + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " of " + this.shoe.decks + " decks left" })));
+      h("div", { class: "small muted num", text: "About " + shownDecks(this.shoe) + " of " + this.shoe.decks + " decks left" })));
 
     if (this.opts.others) {
       var others = h("select", { "aria-label": "Other players", onchange: function (e) { self.others = parseInt(e.target.value, 10); self.reset("Table changed. New shuffle, count back to 0."); } },
@@ -491,7 +503,7 @@
           ". It was ", h("span", { class: "hl num", text: signed(L.rc) }), "."),
         h("p", null, "True count: ", h("span", { class: L.tcOk ? "right" : "wrong", text: L.tcOk ? "right" : "you said " + fmt(L.tcVal) }),
           ". It was ", h("span", { class: "hl num", text: tcText(L.tc) }),
-          " (" + signed(L.rc) + " ÷ " + (Math.round(L.decksLeft * 100) / 100) + " decks left).")));
+          " (" + signed(L.rc) + " ÷ " + (Math.round(L.decksLeft * 100) / 100) + " decks left)." + estimateNote(L.rc, L.shown, L.tc))));
     } else {
       side.appendChild(h("p", { class: "small muted", text: "Keep a running count in your head as cards appear. The game stops to check it after the hand." }));
     }
@@ -621,6 +633,12 @@
       last.outcome = rd.results.filter(function (x) { return x.seat === rd.userSeat; }).map(function (x) { return x.outcome; }).join(", ");
       if (ses.bank < ses.min) { this.finish("broke"); return; }
       if (ses.bet > ses.bank) ses.bet = Math.floor(ses.bank);
+      // Reached the cut card: shuffle now, before the next bet, so the player bets knowing the
+      // count restarts at 0 (Jenna's agent's review of PR #20).
+      if (this.shoe.needsShuffle(this.seats() * 4 + 6)) {
+        this.shoe.shuffle(); this.counter.reset();
+        this.msg = "The dealer reached the cut card and shuffled. Start your count over at 0 before you bet.";
+      }
     }
     this.render();
     this.runBots();
@@ -727,7 +745,7 @@
         h("div", { class: "small muted", text: "Discard tray (cards already played)" }),
         h("div", { class: "tray-bar", role: "img", "aria-label": Math.round(used * 100) + "% of the shoe played" },
           h("div", { class: "tray-fill", style: "width:" + (used * 100).toFixed(1) + "%" })),
-        h("div", { class: "small muted num", text: "About " + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " of " + this.shoe.decks + " decks left" })),
+        h("div", { class: "small muted num", text: "About " + shownDecks(this.shoe) + " of " + this.shoe.decks + " decks left" })),
       h("button", { class: "btn", type: "button", disabled: !this.betting(), onclick: function () { self.finish("cashout"); } }, "Cash out and see summary"));
     root.appendChild(h("div", { class: "table-grid with-side" }, main, side));
   };
@@ -1054,9 +1072,10 @@
   Drill.prototype.submit = function (rcVal, tcVal) {
     var rc = this.counter.running, tc = this.counter.trueCount(this.shoe);
     var rcOk = rcVal === rc;
-    var tcOk = !this.askTrue || this.done || tcRight(tcVal, tc);
+    var shown = shownDecks(this.shoe);
+    var tcOk = !this.askTrue || this.done || tcRight(tcVal, tc, rc, shown);
     this.stats.n++; if (rcOk && tcOk) this.stats.right++;
-    this.result = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal, final: this.done, left: this.shoe.decksRemaining() };
+    this.result = { rc: rc, tc: tc, rcOk: rcOk, tcOk: tcOk, rcVal: rcVal, tcVal: tcVal, final: this.done, left: this.shoe.decksRemaining(), shown: shown };
     this.pending = false;
     this.untilCheck = this.gap();
     this.render();
@@ -1091,7 +1110,7 @@
     if (this.pending) {
       var fields = [countField("drc", "Running count")];
       if (this.askTrue && !this.done)
-        fields.push(countField("dtc", "True count (" + (Math.round(this.shoe.decksRemaining() * 2) / 2) + " decks left, nearest whole number)", true));
+        fields.push(countField("dtc", "True count (" + shownDecks(this.shoe) + " decks left, nearest whole number)", true));
       stage.appendChild(countForm(fields, function (rcv, tcv) { self.submit(rcv, tcv); },
         h("p", null, h("b", { text: this.done ? "That's the whole shoe. What's your final running count?" : "Stop. What's the running count?" }))));
     } else if (this.result) {
@@ -1100,7 +1119,7 @@
         h("p", null, R.rcOk ? h("span", { class: "right", text: "Right. " }) : h("span", { class: "wrong", text: "You said " + signed(R.rcVal) + ". " }),
           "The running count is ", h("span", { class: "hl num", text: signed(R.rc) }), "."),
         this.askTrue && !R.final ? h("p", null, R.tcOk ? h("span", { class: "right", text: "True count right. " }) : h("span", { class: "wrong", text: "True count: you said " + fmt(R.tcVal) + ". " }),
-          "It's ", h("span", { class: "hl num", text: tcText(R.tc) }), " (" + signed(R.rc) + " ÷ " + (Math.round(R.left * 100) / 100) + " decks left).") : null,
+          "It's ", h("span", { class: "hl num", text: tcText(R.tc) }), " (" + signed(R.rc) + " ÷ " + (Math.round(R.left * 100) / 100) + " decks left)." + estimateNote(R.rc, R.shown, R.tc)) : null,
         R.final ? h("button", { class: "btn primary", onclick: function () { self.reset(); } }, "Shuffle and start again") : null));
     }
     root.appendChild(stage);
