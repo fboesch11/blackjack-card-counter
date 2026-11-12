@@ -142,7 +142,10 @@
       maxHands: 4,          // resplit up to 4 hands
       resplitAces: false,
       blackjackPays: 1.5,
-      peek: true
+      peek: true,
+      // Insurance: when the dealer shows an ace, each player may bet half their bet that the hole
+      // card is a ten; it pays 2 to 1. Off by default so the engine's other behavior is unchanged.
+      insurance: !!o.insurance
     };
   }
 
@@ -193,12 +196,32 @@
     this.hands.forEach(function (h) { self._deal(h, true); });
     this._deal(this.dealer, false);  // hole card
     this.phase = "player";
+    this.insured = {};          // seat -> insurance bet placed (0 if declined)
+    this.insuranceNet = {};     // seat -> insurance win/loss, set once the dealer checks
 
+    // Dealer shows an ace: stop for insurance decisions before the dealer checks for blackjack.
+    if (this.rules.insurance && this.dealer.cards[0].rank === "A") { this.phase = "insurance"; return this; }
+    return this._peekAndPlay();
+  };
+  // Dealer peeks when showing an ace or ten-value card. A dealer blackjack ends the round.
+  Round.prototype._peekAndPlay = function () {
     var up = this.dealer.cards[0];
-    // Dealer peeks when showing an ace or ten-value card. A dealer blackjack ends the round.
+    this.phase = "player";
     if (this.rules.peek && (up.rank === "A" || cardValue(up) === 10) && this.dealer.isBlackjack()) return this._finish();
     this._advance();
     return this;
+  };
+  // Settle insurance for every seat at once. take: { seat: true|false }; missing seats decline.
+  // The insurance bet is half the seat's original bet, pays 2 to 1 if the dealer has blackjack.
+  Round.prototype.decideInsurance = function (take) {
+    if (this.phase !== "insurance") throw new Error("No insurance decision pending");
+    var self = this, dBJ = this.dealer.isBlackjack();
+    for (var s = 0; s < this.seats; s++) {
+      var stake = take && take[s] ? this.seatHands(s)[0].bet / 2 : 0;
+      self.insured[s] = stake;
+      self.insuranceNet[s] = stake ? (dBJ ? 2 * stake : -stake) : 0;
+    }
+    return this._peekAndPlay();
   };
   Round.prototype.current = function () {
     return this.phase === "player" ? this.hands[this.active] : null;
@@ -296,7 +319,8 @@
   // Net result for one seat (default: the user's seat).
   Round.prototype.net = function (seat) {
     if (seat == null) seat = this.userSeat;
-    return (this.results || []).reduce(function (s, r) { return s + (r.seat === seat ? r.net : 0); }, 0);
+    var ins = (this.insuranceNet && this.insuranceNet[seat]) || 0;
+    return (this.results || []).reduce(function (s, r) { return s + (r.seat === seat ? r.net : 0); }, ins);
   };
 
   var api = {
