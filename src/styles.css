@@ -63,7 +63,7 @@ select { min-height: 44px; padding: 6px 8px; border: 1.5px solid var(--ink); bor
 
 .modes { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 2px solid var(--ink); }
 .modes button {
-  background: none; border: 0; padding: 10px 14px; min-height: 44px; cursor: pointer; white-space: nowrap;
+  background: none; border: 0; padding: 10px 11px; min-height: 44px; font-size: 0.95rem; cursor: pointer; white-space: nowrap;
   border-radius: 8px 8px 0 0; color: var(--ink-soft);
 }
 .modes button[aria-selected="true"] { background: var(--ink); color: var(--paper); }
@@ -228,3 +228,6 @@ table.blunders td { text-align: left; vertical-align: top; }
 table.blunders td.num { text-align: center; }
 tr.flagged td { background: color-mix(in srgb, var(--red) 8%, transparent); }
 details.math-sec summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+/* Insurance question */
+.insurance { border: 1.5px solid var(--ink); border-radius: 10px; padding: 12px; background: var(--panel); }
+.insurance p { margin: 0 0 8px; }

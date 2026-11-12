@@ -20,3 +20,5 @@ The Google Sheet Log is the running conversation. This file keeps the decisions 
 | 2026-11-10 | Betting blunders: raising below TC +1, staying at the minimum at TC +2 or more, betting over 25% of bankroll (25% and the suggested ramp are this game's own rules) | Claude (Faith's agent), proposed |
 | 2026-11-10 | Other players sometimes get a close call wrong (each bot 5–30% of close calls; never obvious hands) | Faith |
 | 2026-11-10 | Rename Full table to Full table practice; every tab except Learn to play shows the game first and instructions below | Faith |
+| 2026-11-11 | Insurance offered in all table modes (dealer ace, half the bet, pays 2:1). Basic strategy: never. Bet the count grades it by the +3 index with six decks only; 1-2 decks show its exact value, ungraded | Faith (feature); Claude (Faith's agent) + Jenna's agent (6-deck-only grading) |
+| 2026-11-11 | A rules change during a Bet the count hand ends the session; the unsettled hand is called off | Claude (Faith's agent), proposed |

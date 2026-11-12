@@ -172,3 +172,32 @@ test("shoe running out mid-round reshuffles without duplicating table cards", ()
   }
   assert.ok(reshuffles > 0, "test should hit the mid-round reshuffle");
 });
+
+test("insurance: offered only when on, only vs an ace; pays 2 to 1 on half the bet", () => {
+  // off by default: dealer A,K ends the round as before
+  assert.equal(roundWith("10 A 9 K").start().phase, "done");
+  // on: pauses for the decision
+  const r = roundWith("10 A 9 K", { insurance: true }).start(10);
+  assert.equal(r.phase, "insurance");
+  r.decideInsurance({ 0: true });
+  assert.equal(r.phase, "done");
+  assert.equal(r.net(0), -10 + 10, "lose the hand (-10), win insurance 2 x 5");
+  // dealer has no blackjack: insurance lost, play continues
+  const n = roundWith("10 A 9 7 5", { insurance: true }).start(10);
+  n.decideInsurance({ 0: true });
+  assert.equal(n.phase, "player");
+  n.act("stand");
+  assert.equal(n.net(0), -5 + 10, "insurance -5, then 19 beats dealer 18 for +10");
+  // declining costs nothing
+  const d = roundWith("10 A 9 K", { insurance: true }).start(10);
+  d.decideInsurance({ 0: false });
+  assert.equal(d.net(0), -10);
+  // no pause against a ten
+  assert.equal(roundWith("10 K 9 7", { insurance: true }).start().phase, "player");
+});
+
+test("insurance with a player blackjack is even money", () => {
+  const r = roundWith("A A K K", { insurance: true }).start(10);
+  r.decideInsurance({ 0: true });
+  assert.equal(r.net(0), 0 + 10, "blackjack pushes, insurance wins 2 x 5 = even money");
+});

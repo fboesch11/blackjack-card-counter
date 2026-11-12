@@ -159,7 +159,8 @@
   /* ---------- Settings ---------- */
   var settings = { decks: parseInt(store("bj.decks") || "6", 10), h17: store("bj.h17") === "1" };
   if ([1, 2, 6].indexOf(settings.decks) < 0) settings.decks = 6;
-  function rules() { return BJ.makeRules(settings); }
+  // Insurance is offered in every table mode (the Strategy quiz doesn't use it).
+  function rules() { return BJ.makeRules({ decks: settings.decks, h17: settings.h17, insurance: true }); }
 
   var form = document.getElementById("settings");
   form.querySelector('input[name=decks][value="' + settings.decks + '"]').checked = true;
@@ -293,7 +294,27 @@
     this.render();
     this.runBots();
   };
+  // Insurance (dealer shows an ace). Other players decline, as basic strategy says, except that
+  // a sloppy player now and then takes it, a common real-table mistake.
+  TableGame.prototype.botInsurance = function () {
+    var rd = this.round, take = {};
+    for (var seat = 0; seat < rd.seats; seat++)
+      if (seat !== rd.userSeat) take[seat] = Math.random() < this.botSlop(seat) / 2;
+    return take;
+  };
+  TableGame.prototype.insure = function (yes) {
+    var rd = this.round;
+    if (!rd || rd.phase !== "insurance") return;
+    if (this.opts.coach && CHARTS[S.ruleSetKey(rules())]) {
+      this.stats.moves++; if (!yes) this.stats.movesRight++;
+      this.coachMsg = { insurance: true, good: !yes };
+    }
+    var take = this.botInsurance(); take[rd.userSeat] = !!yes;
+    rd.decideInsurance(take);
+    this.afterMove();
+  };
   TableGame.prototype.hint = function () {
+    if (this.round && this.round.phase === "insurance") { this.coachMsg = { insurance: true, hint: true }; this.render(); return; }
     var rd = this.round;
     if (!rd || rd.phase !== "player" || !rd.isUserTurn()) return;
     var rec = S.recommend(CHARTS, rules(), rd.current(), rd.dealer.cards[0], rd.available());
@@ -311,6 +332,7 @@
     this.render();
   };
   TableGame.prototype.key = function (k) {
+    if (this.round && this.round.phase === "insurance") { if (k === "y") this.insure(true); else if (k === "n") this.insure(false); return; }
     if (k === "n" || k === "Enter") { if (!this.round || this.round.phase === "done") this.deal(); return; }
     for (var a in ACTION_KEY) if (ACTION_KEY[a] === k) this.act(a);
   };
@@ -335,6 +357,8 @@
       if (o.coach) actions.appendChild(h("button", { class: "btn", onclick: function () { self.hint(); } }, "What should I do?"));
     } else if (inRound) {
       actions.appendChild(h("p", { class: "muted", text: this.seatName(rd.current().seat) + " is playing. Count their cards." }));
+    } else if (rd && rd.phase === "insurance") {
+      actions.appendChild(this.insurancePrompt(null, true));
     } else {
       actions.appendChild(h("button", { class: "btn primary", disabled: this.pendingCheck, onclick: function () { self.deal(); } },
         rd ? "Deal next hand" : "Deal", h("kbd", { text: "N" })));
@@ -394,14 +418,36 @@
           h("div", { class: "res" }, h("b", { text: totalText(hd) }), hd.doubled ? " (doubled)" : "",
             resText ? h("span", { class: mine ? (res.net > 0 ? "right" : res.net < 0 ? "wrong" : "") : "muted" }, " " + resText) : null)));
       });
+      if (rd && rd.insured && rd.insured[seat]) {
+        var insNet = rd.insuranceNet[seat];
+        hands.appendChild(h("p", { class: "small " + (mine ? (insNet > 0 ? "right" : "wrong") : "muted"),
+          text: "Insured: " + (insNet > 0 ? "dealer had blackjack, insurance won" : "insurance lost") +
+            (mine ? " (" + (self.fmtNet ? self.fmtNet(insNet) : signed(insNet)) + ")" : "") }));
+      }
       var label = multi ? this.seatName(seat) : (rd && rd.hands.length > 1 ? "Your hands" : "You");
       seatsEl.appendChild(h("section", { class: "spot" + (multi ? " seat" : "") + (multi && mine ? " mine" : ""), "aria-label": label },
         h("h3", { text: label }), hands));
     }
     return { dealer: dealer, seats: seatsEl };
   };
+  // The insurance question, with the price. canAfford false (Bet the count) leaves only "No".
+  TableGame.prototype.insurancePrompt = function (stakeText, canAfford) {
+    var self = this;
+    return h("div", { class: "insurance", "aria-live": "polite" },
+      h("p", null, h("b", { text: "The dealer shows an ace. Insurance?" }),
+        " It's a side bet of half your bet" + (stakeText ? " (" + stakeText + ")" : "") + " that the dealer's hidden card is a ten. It pays 2 to 1."),
+      h("div", { class: "row" },
+        canAfford === false ? h("p", { class: "small muted", text: "You don't have enough money left for insurance." }) :
+          h("button", { class: "btn", type: "button", onclick: function () { self.insure(true); } }, "Take insurance", h("kbd", { text: "Y" })),
+        h("button", { class: "btn", type: "button", onclick: function () { self.insure(false); } }, "No insurance", h("kbd", { text: "N" })),
+        this.opts.coach ? h("button", { class: "btn", type: "button", onclick: function () { self.hint(); } }, "What should I do?") : null));
+  };
   TableGame.prototype.renderCoach = function () {
     var m = this.coachMsg, r = rules();
+    if (m && m.insurance) return h("div", { class: "coach", "aria-live": "polite" },
+      m.hint ? "Basic strategy says " : (m.good ? h("span", { class: "right", text: "Matches basic strategy. " }) : h("span", { class: "wrong", text: "Basic strategy says " })),
+      m.hint || !m.good ? h("span", { class: "hl", text: "No insurance" }) : null, m.hint || !m.good ? ". " : null,
+      "Insurance loses money unless more than a third of the cards left are tens. Card counters take it when the true count is +3 or higher, which you'll practice later.");
     if (!CHARTS[S.ruleSetKey(r)]) return chartMissingNotice(r);
     if (!m) return h("div");
     if (m.missing) return chartMissingNotice(r);
@@ -492,7 +538,10 @@
   // A rules change mid-session ends the session (so its results aren't lost); otherwise back to setup.
   SimGame.prototype.reset = function (note) {
     this.stopBots();
-    if (this.phase === "play" && this.session && this.session.hands.length && (!this.round || this.round.phase === "done")) {
+    if (this.phase === "play" && this.session && this.session.hands.length) {
+      // A hand still in progress is called off: its bet was never settled, so the money is unchanged.
+      if (this.round && this.round.phase !== "done") this.session.hands[this.session.hands.length - 1].outcome = "called off, rules changed";
+      this.round = null;
       this.finish("rules"); return;
     }
     this.phase = "setup"; this.session = null; this.round = null; this.msg = note || "";
@@ -503,7 +552,7 @@
     this.others = st.others; this.seatPos = st.seatPos;
     this.shoe = new BJ.Shoe(r.decks); this.counter = new BJ.Counter();
     this.session = { start: st.bank, bank: st.bank, min: st.min, max: st.min * SIM.maxUnits, bet: st.min,
-      hands: [], strategy: [], decisions: 0, end: null, finalGuess: null, rules: S.ruleSetLabel(r) };
+      hands: [], strategy: [], insurance: [], decisions: 0, end: null, finalGuess: null, rules: S.ruleSetLabel(r), decks: r.decks };
     this.phase = "play"; this.round = null; this.msg = "";
     this.render();
   };
@@ -544,7 +593,7 @@
   // What the player can do now, including whether there's money left to double or split.
   SimGame.prototype.allowedNow = function () {
     var rd = this.round, ok = rd.available(), hand = rd.current();
-    var onTable = rd.seatHands(rd.userSeat).reduce(function (sum, x) { return sum + x.bet; }, 0);
+    var onTable = rd.seatHands(rd.userSeat).reduce(function (sum, x) { return sum + x.bet; }, 0) + (rd.insured[rd.userSeat] || 0);
     if (this.session.bank - onTable < hand.bet) { ok.double = false; ok.split = false; }
     return ok;
   };
@@ -584,8 +633,31 @@
     this.phase = "final";
     this.render();
   };
+  // The real chance the hole card is a ten, from the cards the player hasn't seen (shoe + hole card).
+  SimGame.prototype.exactInsurance = function () {
+    var rd = this.round, unseen = this.shoe.cards.slice(this.shoe.pos).concat([rd.dealer.cards[1]]);
+    var tens = unseen.filter(function (c) { return BJ.cardValue(c) === 10; }).length;
+    var p = tens / unseen.length;
+    return { p: p, ev: 3 * p - 1 };
+  };
+  SimGame.prototype.canInsure = function () {
+    var rd = this.round, bet = rd.seatHands(rd.userSeat)[0].bet;
+    return this.session.bank - bet >= bet / 2;
+  };
+  SimGame.prototype.insure = function (yes) {
+    var rd = this.round, ses = this.session;
+    if (!rd || rd.phase !== "insurance") return;
+    if (yes && !this.canInsure()) return;
+    var ex = this.exactInsurance();
+    ses.insurance.push({ n: ses.hands.length, took: !!yes, tc: this.counter.trueCount(this.shoe), p: ex.p, ev: ex.ev,
+      dealerBJ: rd.dealer.isBlackjack(), graded: rules().decks === 6 });
+    var take = this.botInsurance(); take[rd.userSeat] = !!yes;
+    rd.decideInsurance(take);
+    this.afterMove();
+  };
   SimGame.prototype.key = function (k) {
     if (this.phase !== "play") return;
+    if (this.round && this.round.phase === "insurance") { if (k === "y") this.insure(true); else if (k === "n") this.insure(false); return; }
     if (k === "n" || k === "Enter") { this.deal(); return; }
     for (var a in ACTION_KEY) if (ACTION_KEY[a] === k) this.act(a);
   };
@@ -596,7 +668,7 @@
       h("p", { text: "You start with a set amount of money and play against the dealer with other players at the table. Before each hand, set your bet. Keep the Hi-Lo count yourself. Nothing on screen tells you the count or the right play while you're playing." }),
       h("p", { text: "When the true count is +2 or higher, the cards left favor you, so that's the time to bet more. Below +1, the house has the edge, so bet the minimum. Between +1 and +2, either is fine." }),
       h("p", { text: "Cash out whenever you like. The session also ends if you can't cover the table minimum. Then you get a summary of every betting and strategy blunder you made." }),
-      h("p", { class: "small muted", text: "The other players mostly play basic strategy but sometimes get a close call wrong. The discard tray is shown, like at a real table, so you can estimate decks left. Insurance isn't offered in this game." }));
+      h("p", { class: "small muted", text: "The other players mostly play basic strategy but sometimes get a close call wrong. The discard tray is shown, like at a real table, so you can estimate decks left. When the dealer shows an ace you'll be offered insurance; with six decks, taking it at a true count of +3 or higher is the counter's rule." }));
   };
 
   SimGame.prototype.render = function () {
@@ -641,6 +713,8 @@
       });
     } else if (inRound) {
       actions.appendChild(h("p", { class: "muted", text: this.seatName(rd.current().seat) + " is playing." }));
+    } else if (rd && rd.phase === "insurance") {
+      actions.appendChild(this.insurancePrompt(money(rd.seatHands(rd.userSeat)[0].bet / 2), this.canInsure()));
     }
     var main = h("div", null, t.dealer, t.seats, actions, h("p", { class: "msg", "aria-live": "polite", text: this.msg }));
     if (this.betting()) main.appendChild(this.renderBet());
@@ -699,6 +773,12 @@
       x.flags.forEach(function (f) { out.blunders.push({ n: x.n, kind: f, hand: x }); });
     });
     ses.strategy.forEach(function (s) { out.blunders.push({ n: s.n, kind: "strategy", s: s }); });
+    // Insurance, six decks only: the Hi-Lo index is +3 (Illustrious 18 #1, six decks).
+    ses.insurance.forEach(function (x) {
+      if (!x.graded) return;
+      if (x.took && tenth(x.tc) < 3) out.blunders.push({ n: x.n, kind: "insNoEdge", ins: x });
+      if (!x.took && tenth(x.tc) >= 3) out.blunders.push({ n: x.n, kind: "insMissed", ins: x });
+    });
     out.blunders.sort(function (a, b) { return a.n - b.n; });
     out.corr = pearson(ses.hands.map(function (x) { return x.tc; }), ses.hands.map(function (x) { return x.bet; }));
     return out;
@@ -768,17 +848,36 @@
       h("p", { text: ses.strategy.length ? "Strategy blunders: " + ses.strategy.length + " of " + ses.decisions + " decisions didn't match basic strategy." :
         (ses.decisions ? "All " + ses.decisions + " of your decisions matched basic strategy." : "You didn't make any playing decisions.") })));
 
-    var KIND = { noEdge: "Raised with no edge", missed: "Stayed at the minimum with an edge", risky: "Risky bet", strategy: "Strategy" };
+    var KIND = { noEdge: "Raised with no edge", missed: "Stayed at the minimum with an edge", risky: "Risky bet", strategy: "Strategy",
+      insNoEdge: "Insurance below +3", insMissed: "Skipped insurance at +3 or more" };
     function describe(b) {
       if (b.kind === "strategy") {
         var s = b.s;
         return [s.cards.map(function (c) { return c.rank; }).join(", ") + " (" + s.total + ") vs dealer " + BJ.upcardKey(s.up) + ". You chose " + ACTION_LABEL[s.did].toLowerCase() + ".",
           "Basic strategy: " + S.CODE_NAMES[s.code].toLowerCase() + "."];
       }
+      if (b.kind === "insNoEdge") return ["Took insurance at a true count of " + tcText(b.ins.tc) + ".", "Decline insurance below +3. Not enough tens are left for it to pay."];
+      if (b.kind === "insMissed") return ["Declined insurance at a true count of " + tcText(b.ins.tc) + ".", "Take insurance at +3 or higher. Enough tens are left that it pays."];
       var x = b.hand;
       if (b.kind === "noEdge") return ["Bet " + money(x.bet) + " at a true count of " + tcText(x.tc) + ".", "Bet the minimum, " + money(ses.min) + ". Below +1 the house still has the edge."];
       if (b.kind === "missed") return ["Bet the minimum at a true count of " + tcText(x.tc) + ".", "Raise your bet, e.g. " + money(x.suggest) + ". At +2 and up the cards favor you."];
       return ["Bet " + money(x.bet) + ", " + Math.round(x.bet / x.bankBefore * 100) + "% of the " + money(x.bankBefore) + " you had.", "Keep each bet to a small share of your money so a losing streak can't end your session."];
+    }
+    if (ses.insurance.length) {
+      var took = ses.insurance.filter(function (x) { return x.took; }).length;
+      root.appendChild(h("section", { class: "math-sec" }, h("h3", { text: "Insurance" }),
+        h("p", { text: "The dealer showed an ace " + ses.insurance.length + (ses.insurance.length === 1 ? " time" : " times") + " and you took insurance " + took + (took === 1 ? " time." : " times.") +
+          (ses.decks === 6 ? " Graded by the Hi-Lo index: take it at a true count of +3 or higher." :
+            " With " + ses.decks + (ses.decks === 1 ? " deck" : " decks") + " this isn't graded, because the +3 index is for six decks. The table shows whether it actually paid from the cards left.") }),
+        h("div", { class: "chart-wrap" }, h("table", { class: "chart math-table" },
+          h("thead", null, h("tr", null, ["Hand", "True count", "You", "Chance hole card is a ten", "Value of insurance", "Dealer had blackjack"].map(function (c) { return h("th", { scope: "col", text: c }); }))),
+          h("tbody", null, ses.insurance.map(function (x) {
+            return h("tr", null, h("td", { class: "num", text: String(x.n) }), h("td", { class: "num", text: tcText(x.tc) }),
+              h("td", { text: x.took ? "Took it" : "Declined" }), h("td", { class: "num", text: (x.p * 100).toFixed(1) + "%" }),
+              h("td", { class: "num " + (x.ev > 0 ? "right" : ""), text: (x.ev > 0 ? "+" : "") + (x.ev * 100).toFixed(1) + "% per bet" }),
+              h("td", { text: x.dealerBJ ? "Yes" : "No" }));
+          })))),
+        h("p", { class: "small muted", text: "Chance and value are calculated here from the actual cards you hadn't seen. Value = 3 × chance − 1, which is positive only above 1 in 3. You can't see those cards, so the true count is how you estimate it." })));
     }
     root.appendChild(h("section", { class: "math-sec" }, h("h3", { text: "Every blunder" }),
       A.blunders.length ? h("div", { class: "chart-wrap" }, h("table", { class: "chart math-table blunders" },
@@ -805,6 +904,9 @@
         h("li", null, "Spread: Action Network suggests about 8 units on double deck and calls 16 units on six decks pushing it. ",
           link(SIM_SRC.hilo, "Wizard of Odds"), " calls 1 to 15 about the most aggressive spread for six decks."),
         h("li", { text: "This game's own rules, not published standards: the suggested bets (1 unit up to +1, then 2, 4, 6 and 8 units at +2, +3, +4, +5 and up) and the risky-bet line at 25% of your money." }),
+        h("li", null, "Insurance (six decks only): take it at a true count of +3 or higher. That's the first of the Illustrious 18 index plays from Don Schlesinger's Blackjack Attack, as listed by ",
+          link("https://www.blackjackinfo.com/card-counting/illustrious-18/", "BlackjackInfo"), " and ",
+          link("https://www.countingedge.com/blackjack-players/don-schlesinger/the-illustrious-18-card-counting-indices/", "CountingEdge"), "."),
         h("li", { text: "Strategy blunders compare your play with the basic strategy chart for these rules. Count-based index plays aren't graded." }))));
 
     root.appendChild(h("div", { class: "row" },
