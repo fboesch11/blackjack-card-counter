@@ -72,6 +72,10 @@ def expected(rs, cards, up, allowed):
         row = total_row(); code = chart[row][upkey(up)]; act = resolve(code)
     return act, row, code
 
+# PR #23: a true count that matches running count / the decks-left number shown also counts as right.
+# Detected from the built page, so the tester works on builds before and after #23.
+ESTIMATE_ACCEPTED = [False]
+
 # ---------------------------------------------------------------- results
 RESULTS = {"matrix": {}, "checks": {}, "issues": [], "notes": [], "stats": {}}
 def mark(mode, rs, ok, note=""):
@@ -120,6 +124,7 @@ def new_page(browser, mobile=False, clock=False):
     page.on("console", lambda m: page._errs.append("console " + m.type + ": " + m.text) if m.type == "error" else None)
     if clock: page.clock.install()
     page.goto(HTML)
+    ESTIMATE_ACCEPTED[0] = "also counts as right" in Path(HTML.replace("file://", "")).read_text(encoding="utf-8")
     page.evaluate("try{localStorage.clear()}catch(e){}")
     page.reload()
     return page
@@ -305,8 +310,13 @@ def do_check(page, mode, rs, tr, where):
         stat("count checks skipped after mid-hand reshuffle")
         return True
     exact_tc = tr.tc()
-    test_wrong_tc = random.random() < 0.2 and whole_tc(tr.rc / tr.decks) != whole_tc(exact_tc)
-    tc_in = whole_tc(tr.rc / tr.decks) if test_wrong_tc else whole_tc(exact_tc)
+    est_ans = whole_tc(tr.rc / shown_left) if shown_left else None
+    accepts_estimate = ESTIMATE_ACCEPTED[0]
+    wrong_ans = whole_tc(tr.rc / tr.decks)
+    test_wrong_tc = random.random() < 0.2 and wrong_ans != whole_tc(exact_tc) and not (accepts_estimate and wrong_ans == est_ans)
+    use_estimate = (not test_wrong_tc) and accepts_estimate and est_ans is not None and est_ans != whole_tc(exact_tc) and random.random() < 0.5
+    tc_in = wrong_ans if test_wrong_tc else (est_ans if use_estimate else whole_tc(exact_tc))
+    if use_estimate: stat("true count answered with the on-screen estimate (should be right)")
     panel(page).locator(".check [data-count=rc]").fill(str(tr.rc)); panel(page).locator(".check [data-count=tc]").fill(str(tc_in))
     panel(page).locator(".check button.btn.primary").click()
     side = state(page)["side"]
@@ -463,6 +473,9 @@ def run_sim(page, rs, hands=40, others=3):
     for i in range(hands):
         deal = P.get_by_role("button", name=re.compile("^Deal "))
         if deal.count() == 0: break
+        pre = state(page)["msg"]
+        if "shuffled" in pre.lower() and "mid-hand" not in pre and "before you bet" in pre:
+            tr.reset(); stat("sim shuffles announced before the bet")
         tc = tenth_js(tr.tc()) if tr.synced else 0
         units = 1 if tc < 2 else (2 if tc < 3 else 4 if tc < 4 else 6 if tc < 5 else 8)
         P.get_by_role("button", name="Minimum").click()
@@ -470,7 +483,7 @@ def run_sim(page, rs, hands=40, others=3):
         if units > 1: raised += 1
         deal.click()
         st = state(page)
-        if "dealer shuffled" in st["msg"].lower() and "mid-hand" not in st["msg"]:
+        if "dealer shuffled" in st["msg"].lower() and "mid-hand" not in st["msg"] and "before you bet" not in st["msg"]:
             tr.reset(); stat("sim shuffles announced after Deal")
             if units > 1: raised_then_shuffled += 1
         for _ in range(400):
