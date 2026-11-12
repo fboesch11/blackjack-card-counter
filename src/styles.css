@@ -1,5 +1,9 @@
 /* Math-notebook look: graph paper, navy ink, red grading pencil, a highlighter for "the answer". */
 :root {
+  --felt: #1f5c45;
+  --felt-deep: #174837;
+  --felt-ink: #eef4ef;
+  --gold: #b8902f;
   --paper: #eef2f5;
   --grid: #d6dfe7;
   --ink: #1c2b45;
@@ -18,6 +22,7 @@
     --paper: #142030; --grid: #1f2d40; --ink: #e5ebf2; --ink-soft: #9fb0c4;
     --red: #ef7d70; --green: #6cc490; --hl: #8a7a22; --card: #f7f9fb; --card-edge: #3a4a60;
     --panel: rgba(20, 32, 48, 0.85);
+    --felt: #17473a; --felt-deep: #10342a; --felt-ink: #e6efe9; --gold: #d2ac4f;
   }
 }
 * { box-sizing: border-box; }
@@ -253,3 +258,35 @@ ol.path li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; alig
 ol.path li > div { grid-column: 1; }
 ol.path li > button { grid-column: 2; grid-row: 1 / span 2; }
 ol.path li.done::marker { color: var(--green); }
+
+/* ---------- Casino touches (Jenna's request, approved by Faith Nov 11) ----------
+ * Kept to the table itself: green felt behind the cards, chip-colored bet buttons, a thin gold
+ * accent. Text, charts and The math stay on the plain page. */
+.masthead h1 { padding-bottom: 6px; background: linear-gradient(var(--gold), var(--gold)) 0 100% / 56px 3px no-repeat; }
+.modes button[aria-selected="true"] { box-shadow: inset 0 3px 0 var(--gold); }
+
+.felt {
+  background: radial-gradient(ellipse at 50% 0%, var(--felt) 0%, var(--felt-deep) 100%);
+  color: var(--felt-ink); border-radius: 18px; padding: 14px 16px 12px;
+  border: 3px solid #5a3b22; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.felt .spot h3, .felt h3 { color: var(--felt-ink); }
+.felt .spot .total, .felt .muted { color: #c9d8cf; }
+.felt .right { color: #9fe0b6; }
+.felt .wrong { color: #ffb1a6; }
+.felt .hand.active { border-color: var(--gold); }
+.felt .seat.mine { background: rgba(255, 255, 255, 0.08); outline-color: var(--gold); }
+.felt .res b { color: var(--felt-ink); }
+.quiz-hand.felt { margin-bottom: 4px; }
+
+.btn.chip {
+  border-radius: 999px; min-width: 64px; color: #fff; font-weight: 700;
+  border: 3px dashed rgba(255, 255, 255, 0.85); outline: 2px solid var(--chip, #2c5aa0); outline-offset: -1px;
+  background: var(--chip, #2c5aa0);
+}
+@media (hover: hover) { .btn.chip:hover:not(:disabled) { filter: brightness(1.12); background: var(--chip, #2c5aa0); color: #fff; } }
+.chip-5 { --chip: #b3261e; }   /* red */
+.chip-10 { --chip: #2c5aa0; }  /* blue */
+.chip-25 { --chip: #1e7a46; }  /* green */
+.chip-100 { --chip: #1b1b1b; } /* black */
+.chip-500 { --chip: #5b2a86; } /* purple */
