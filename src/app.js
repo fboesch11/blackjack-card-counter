@@ -105,7 +105,8 @@
   // Ids are made unique per field: two modes can have a count question open at once, and a
   // shared id would tie each label to the hidden screen's box. data-count keeps a stable hook.
   var fieldSeq = 0;
-  function countField(name, labelText, decimals) {
+  // noSign: leave out the ± button (for answers that can't be negative, like decks left).
+  function countField(name, labelText, decimals, noSign) {
     var id = name + "-" + (++fieldSeq);
     var input = h("input", { class: "ans num", type: "text", id: id, "data-count": name, autocomplete: "off", autocapitalize: "off",
       spellcheck: "false", placeholder: "e.g. -3", inputmode: decimals ? "decimal" : "numeric" });
@@ -114,6 +115,7 @@
       input.value = v.charAt(0) === "-" ? v.slice(1) : "-" + v.replace(/^\+/, "");
       input.focus();
     } }, "±");
+    if (noSign) { input.setAttribute("placeholder", "e.g. 2.5"); return { input: input, label: labelText, el: [h("label", { for: id, text: labelText }), h("div", { class: "row" }, input)] }; }
     return { input: input, label: labelText, el: [h("label", { for: id, text: labelText }), h("div", { class: "row" }, flip, input),
       h("p", { class: "small muted hint-neg", text: "Negative? Tap ± to add or remove the minus sign." })] };
   }
@@ -1124,7 +1126,6 @@
   Drill.prototype.render = function (fresh) {
     var self = this, root = clear(this.root);
     // Faith: the drill goes first, the instructions below it.
-    root.appendChild(h("h2", { class: "drill-title", text: "Count drill" }));
     if (this.note) root.appendChild(h("p", { class: "muted small", text: this.note }));
 
     var speed = h("select", { "aria-label": "Flip speed", onchange: function (e) { self.speed = parseInt(e.target.value, 10); self.play(); } },
@@ -1172,6 +1173,184 @@
   };
 
   /* =================================================================
+   * Count drill tab: three drills under one tab (Running count, Decks left, Speed run).
+   * ================================================================= */
+  var DRILL_KINDS = [["count", "Running count"], ["decks", "Decks left"], ["speed", "Speed run"]];
+  function DrillTab(root) {
+    this.root = root; this.subs = {}; this.holders = {};
+    var k = store("bj.drillKind");
+    this.kind = DRILL_KINDS.some(function (d) { return d[0] === k; }) ? k : "count";
+    this.head = h("div", { class: "drill-head" }); this.body = h("div");
+    root.appendChild(this.head); root.appendChild(this.body);
+    this.show(this.kind);
+  }
+  DrillTab.prototype.show = function (kind) {
+    var self = this;
+    if (this.subs[this.kind] && this.subs[this.kind].stop) this.subs[this.kind].stop();
+    this.kind = kind; store("bj.drillKind", kind);
+    clear(this.head);
+    this.head.appendChild(h("h2", { class: "drill-title", text: "Count drill" }));
+    this.head.appendChild(h("div", { class: "seg-buttons", role: "group", "aria-label": "Which drill" }, DRILL_KINDS.map(function (d) {
+      return h("button", { type: "button", class: "btn" + (d[0] === kind ? " primary" : ""), "aria-pressed": String(d[0] === kind),
+        onclick: function () { self.show(d[0]); } }, d[1]);
+    })));
+    Object.keys(this.holders).forEach(function (k) { self.holders[k].hidden = true; });
+    if (!this.holders[kind]) {
+      this.holders[kind] = h("div"); this.body.appendChild(this.holders[kind]);
+      this.subs[kind] = kind === "count" ? new Drill(this.holders[kind]) : kind === "decks" ? new DeckDrill(this.holders[kind]) : new SpeedRun(this.holders[kind]);
+    }
+    this.holders[kind].hidden = false;
+  };
+  DrillTab.prototype.reset = function (note) {
+    var self = this;
+    Object.keys(this.subs).forEach(function (k) { self.subs[k].reset(k === self.kind ? note : undefined); });
+  };
+  DrillTab.prototype.stop = function () { var s = this.subs[this.kind]; if (s && s.stop) s.stop(); };
+  DrillTab.prototype.key = function (k) { var s = this.subs[this.kind]; if (s) s.key(k); };
+
+  /* ---------- Decks left: estimate the shoe from the discard tray ---------- */
+  function DeckDrill(root) { this.root = root; this.marks = false; this.stats = { n: 0, right: 0, err: 0 }; this.reset(); }
+  DeckDrill.prototype.reset = function (note) {
+    this.decks = rules().decks; this.total = 52 * this.decks;
+    // Between about a tenth and nine tenths of the shoe played.
+    this.used = Math.round(this.total * (0.1 + Math.random() * 0.82));
+    this.answer = null; this.note = note || "";
+    this.render();
+  };
+  DeckDrill.prototype.key = function (k) { if (this.answer && (k === "n" || k === "Enter")) this.reset(); };
+  DeckDrill.prototype.check = function (v) {
+    var left = (this.total - this.used) / 52, err = Math.abs(v - left);
+    var ok = err <= 0.5 + 1e-9;
+    this.stats.n++; this.stats.err += err; if (ok) this.stats.right++;
+    this.answer = { v: v, left: left, err: err, ok: ok };
+    progressAdd("decks", { ok: ok, err: err });
+    this.render();
+  };
+  // A side view of the discard tray: a stack of card edges, drawn to the scale of the full shoe.
+  function trayView(used, total, decks, marks) {
+    var NS = "http://www.w3.org/2000/svg", W = 240, H = 260, x0 = 20, w = 120, top = 16, bottom = H - 16;
+    var svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H); svg.setAttribute("class", "tray-view");
+    svg.setAttribute("role", "img"); svg.setAttribute("aria-label", "Discard tray holding the cards already played");
+    function el(tag, a, txt) { var e = document.createElementNS(NS, tag); for (var k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; svg.appendChild(e); return e; }
+    el("rect", { x: x0 - 6, y: top - 6, width: w + 12, height: bottom - top + 12, rx: 6, class: "tray-box" });
+    var hgt = (used / total) * (bottom - top);
+    el("rect", { x: x0, y: bottom - hgt, width: w, height: hgt, class: "tray-cards" });
+    for (var y = bottom - 3; y > bottom - hgt; y -= 3) el("line", { x1: x0, y1: y, x2: x0 + w, y2: y, class: "tray-edge" });
+    if (marks) for (var d = 0.5; d < decks; d += 0.5) {
+      var yy = bottom - (d * 52 / total) * (bottom - top);
+      el("line", { x1: x0 - 10, y1: yy, x2: x0 + w + 10, y2: yy, class: d % 1 ? "tray-mark half" : "tray-mark" });
+      // Marks are labeled with decks LEFT at that height, which is what the question asks.
+      if (d % 1 === 0) el("text", { x: x0 + w + 14, y: yy + 4, class: "tick" }, (decks - d) + " left");
+    }
+    return svg;
+  }
+  DeckDrill.prototype.render = function () {
+    var self = this, root = clear(this.root), A = this.answer;
+    if (this.note) root.appendChild(h("p", { class: "muted small", text: this.note }));
+    var marks = h("input", { type: "checkbox", id: "tray-marks", checked: this.marks ? "checked" : null,
+      onchange: function (e) { self.marks = e.target.checked; self.render(); } });
+    var panel = h("div", { class: "panel" },
+      h("div", { class: "drill-stage" },
+        trayView(this.used, this.total, this.decks, this.marks || !!A),
+        h("div", null,
+          h("p", { text: "The shoe started with " + this.decks + (this.decks === 1 ? " deck" : " decks") + ". The tray holds every card played so far." }),
+          A ? null : countForm([countField("decks", "Decks left in the shoe (nearest half deck)", true, true)], function (v) { self.check(v); }))));
+    if (A) panel.appendChild(h("div", { class: "feedback", "aria-live": "polite" },
+      h("p", null, A.ok ? h("span", { class: "right", text: "Close enough. " }) : h("span", { class: "wrong", text: "Off by " + A.err.toFixed(2) + " decks. " }),
+        "Exactly ", h("span", { class: "hl num", text: (Math.round(A.left * 100) / 100) + " decks" }), " were left (" + (this.total - this.used) + " cards). You said " + A.v + "."),
+      h("p", { class: "small", text: "Why it matters: with a running count of +6, the exact decks left give a true count of " + tcText(6 / A.left) +
+        "; your estimate gives " + (A.v > 0 ? tcText(6 / A.v) : "no answer") + "." }),
+      h("button", { class: "btn primary", type: "button", onclick: function () { self.reset(); } }, "Next tray", h("kbd", { text: "N" }))));
+    root.appendChild(panel);
+    root.appendChild(h("p", { class: "row small drill-controls" }, h("label", null, marks, " Show deck marks (training wheels)")));
+    var st = this.stats;
+    root.appendChild(h("p", { class: "stats" }, h("span", null, "Within half a deck ", h("b", { class: "num", text: st.right + "/" + st.n })),
+      st.n ? h("span", null, "Average miss ", h("b", { class: "num", text: (st.err / st.n).toFixed(2) + " decks" })) : null));
+    root.appendChild(h("section", { class: "intro drill-help", "aria-label": "How this drill works" },
+      h("h3", { text: "How this drill works" }),
+      h("p", { text: "The true count is the running count divided by the decks left, so it's only as good as your guess at decks left. At a real table you estimate it by looking at the discard tray, where the dealer stacks every card that's been played." }),
+      h("p", { text: "Look at how full the tray is compared with the whole shoe, then answer to the nearest half deck. Anything within half a deck counts. Turn on the deck marks to learn what a deck looks like, then practice without them." }),
+      h("p", { class: "small muted" }, "A rough estimate is normal and usually enough: ", h("a", { href: "https://wizardofodds.com/games/blackjack/card-counting/high-low/", rel: "noopener", text: "Wizard of Odds, Hi-Lo" }), ".")));
+  };
+
+  /* ---------- Speed run: count down a deck against the clock ---------- */
+  function SpeedRun(root) { this.root = root; this.perFlip = 1; this.best = null; this.reset(); }
+  SpeedRun.prototype.reset = function (note) {
+    this.stop();
+    // One deck with 1-4 cards secretly taken out, so the final count isn't always 0.
+    var shoe = new BJ.Shoe(1, { penetration: 1 }), out = 1 + rand(4);
+    this.removed = shoe.cards.slice(0, out);
+    this.cards = shoe.cards.slice(out);
+    this.pos = 0; this.started = null; this.elapsed = 0; this.finished = false; this.answer = null; this.showing = [];
+    this.note = note || "";
+    this.render();
+  };
+  SpeedRun.prototype.stop = function () { if (this.tick) { clearInterval(this.tick); this.tick = null; } };
+  SpeedRun.prototype.flip = function () {
+    var self = this;
+    if (this.finished) return;
+    if (!this.started) {
+      this.started = Date.now();
+      this.tick = setInterval(function () { var t = self.root.querySelector(".speed-time"); if (t) t.textContent = ((Date.now() - self.started) / 1000).toFixed(1) + " s"; }, 100);
+    }
+    this.showing = this.cards.slice(this.pos, this.pos + this.perFlip);
+    this.pos += this.showing.length;
+    if (this.pos >= this.cards.length) { this.finished = true; this.elapsed = (Date.now() - this.started) / 1000; this.stop(); }
+    this.render(true);
+  };
+  SpeedRun.prototype.key = function (k) {
+    if (k === " " || k === "n") { if (this.answer) this.reset(); else this.flip(); }
+  };
+  SpeedRun.prototype.check = function (v) {
+    var rc = this.cards.reduce(function (s, c) { return s + BJ.hiLo(c); }, 0);
+    var ok = v === rc;
+    this.answer = { v: v, rc: rc, ok: ok };
+    if (ok && (this.best == null || this.elapsed < this.best)) this.best = this.elapsed;
+    progressAdd("speed", { ok: ok, secs: Math.round(this.elapsed * 10) / 10, cards: this.cards.length });
+    this.render();
+  };
+  SpeedRun.prototype.render = function (fresh) {
+    var self = this, root = clear(this.root), A = this.answer;
+    if (this.note) root.appendChild(h("p", { class: "muted small", text: this.note }));
+    var stage = h("div", { class: "panel" });
+    stage.appendChild(h("div", { class: "drill-stage" },
+      h("div", { class: "drill-cards" }, this.showing.length ? this.showing.map(function (c) { return cardEl(c, { big: true, fresh: fresh }); }) : cardEl(null, { big: true })),
+      h("div", null,
+        h("p", { class: "speed-time num", text: (this.finished ? this.elapsed : this.started ? (Date.now() - this.started) / 1000 : 0).toFixed(1) + " s" }),
+        h("p", { class: "num small muted", text: this.pos + " of " + this.cards.length + " cards" }),
+        this.finished ? null : h("button", { class: "btn primary", type: "button", onclick: function () { self.flip(); } }, this.started ? "Flip" : "Start and flip", h("kbd", { text: "Space" })))));
+    if (this.finished && !A)
+      stage.appendChild(countForm([countField("speed", "Running count for the cards you saw")], function (v) { self.check(v); },
+        h("p", null, h("b", { text: "Done in " + this.elapsed.toFixed(1) + " seconds. What's your count?" }))));
+    if (A) stage.appendChild(h("div", { class: "feedback", "aria-live": "polite" },
+      h("p", null, A.ok ? h("span", { class: "right", text: "Right. " }) : h("span", { class: "wrong", text: "You said " + signed(A.v) + ". " }),
+        "The count was ", h("span", { class: "hl num", text: signed(A.rc) }), ", in " + this.elapsed.toFixed(1) + " seconds (" + (this.cards.length / this.elapsed).toFixed(1) + " cards a second)."),
+      h("p", { class: "small", text: (function (rm) {
+        var tags = rm.map(function (c) { return BJ.hiLo(c); }), sum = tags.reduce(function (x, y) { return x + y; }, 0);
+        return "The deck was missing " + rm.map(function (c) { return c.rank + c.suit; }).join(", ") + " (tags " + tags.map(signed).join(", ") +
+          ", total " + signed(sum) + "). A full deck counts to 0, so the cards you saw count to the opposite: " + signed(-sum || 0) + ".";
+      })(this.removed) }),
+      h("button", { class: "btn primary", type: "button", onclick: function () { self.reset(); } }, "New deck", h("kbd", { text: "Space" }))));
+    root.appendChild(stage);
+    var per = h("select", { "aria-label": "Cards per flip", disabled: this.started && !this.finished ? "disabled" : null,
+      onchange: function (e) { self.perFlip = parseInt(e.target.value, 10); } },
+      [1, 2].map(function (n) { return h("option", { value: n, selected: n === self.perFlip ? "selected" : null }, n + (n === 1 ? " card" : " cards") + " at a time"); }));
+    root.appendChild(h("div", { class: "row small drill-controls" }, per));
+    root.appendChild(h("p", { class: "stats" }, h("span", null, "Best correct time this visit ", h("b", { class: "num", text: this.best == null ? "none yet" : this.best.toFixed(1) + " s" }))));
+    root.appendChild(h("section", { class: "intro drill-help", "aria-label": "How this drill works" },
+      h("h3", { text: "How this drill works" }),
+      h("p", { text: "Flip through one deck as fast as you can while keeping the count. The clock starts on the first flip. A few cards are secretly taken out first, so the final count isn't always 0; at the end you'll see which ones." }),
+      h("p", { text: "Speed only counts if the count is right. When single cards feel easy, switch to two at a time and count each pair as one number: a high and a low card cancel to 0." }),
+      h("p", { class: "small muted" }, "Practice guides commonly suggest working toward a full deck in under 30 seconds with the right count, e.g. ",
+        h("a", { href: "https://forge-blackjacksim.pages.dev/guides/how-to-count-cards-blackjack", rel: "noopener", text: "this card-counting practice guide" }),
+        ". Counting in pairs is suggested by ", h("a", { href: "https://www.lasvegasadvisor.com/blog/the-easy-red-7-count/", rel: "noopener", text: "Las Vegas Advisor" }), ".")));
+  };
+
+  // Saved progress (F5 fills this in); until then results are kept for this visit only.
+  function progressAdd() {}
+
+  /* =================================================================
    * Modes and routing
    * ================================================================= */
   function learnIntro() {
@@ -1199,7 +1378,7 @@
   var builders = {
     learn: function (el) { return new TableGame(el, { coach: true, intro: learnIntro }); },
     quiz: function (el) { return new Quiz(el); },
-    drill: function (el) { return new Drill(el); },
+    drill: function (el) { return new DrillTab(el); },
     count: function (el) { return new TableGame(el, { countChecks: true, intro: countIntro, introBelow: true, title: "Count while playing" }); },
     table: function (el) { return new TableGame(el, { countChecks: true, others: 3, intro: tableIntro, introBelow: true, title: "Full table practice" }); },
     math: function (el) { return new window.BJMath.MathTab(el, { h: h, clear: clear, cardEl: cardEl, rules: rules }); },

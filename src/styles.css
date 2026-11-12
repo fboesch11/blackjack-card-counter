@@ -233,3 +233,14 @@ details.math-sec summary { cursor: pointer; font-weight: 600; min-height: 44px; 
 .insurance p { margin: 0 0 8px; }
 .quiz-tc { margin: 0 0 8px; font-size: 1.05rem; }
 .quiz-tc b { font: 700 1.4rem/1 var(--serif); margin-left: 6px; }
+
+/* Count drill tab: drill picker, tray view, speed run */
+.drill-head .seg-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+svg.tray-view { width: 210px; height: auto; flex: none; }
+svg.tray-view .tray-box { fill: none; stroke: var(--ink-soft); stroke-width: 2; }
+svg.tray-view .tray-cards { fill: var(--card); stroke: var(--card-edge); }
+svg.tray-view .tray-edge { stroke: var(--card-edge); stroke-width: 1; }
+svg.tray-view .tray-mark { stroke: var(--red); stroke-width: 1.5; }
+svg.tray-view .tray-mark.half { stroke-dasharray: 4 3; opacity: 0.7; }
+svg.tray-view .tick { fill: var(--ink-soft); font: 11px var(--sans); }
+.speed-time { font: 700 2rem/1.1 var(--serif); margin: 0 0 4px; }
