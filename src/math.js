@@ -185,7 +185,9 @@
       eq("P(next card ∈ A) = |A ∩ U| ÷ |U|"),
       P("Ten-value cards (10, J, Q, K) are 16 of every 52. In a fresh shoe:"),
       eq("P(ten) = " + tenFull + " ÷ " + n + " = " + (pTen * 100).toFixed(2) + "%   (calculated here)"),
-      P("As the count rises, |H ∩ U| grows relative to |U|, so this probability goes up. That one ratio drives most of the advantage a counter gets.")));
+      P("As the count rises, |H ∩ U| grows relative to |U|, so this probability goes up, and more tens and aces left is what helps the player."),
+      h("p", null, "Where a counter's gain comes from, as estimated for a six-deck shoe by ", link(SRC.intro, "Wizard of Odds"),
+        " (the author's own initial estimate): standing 40%, insurance 34%, doubling 9%, blackjacks 7%, surrender 6%, splits 4%. By that estimate, the extra blackjacks are only a small part of it.")));
 
     // 6. Insurance
     var tensIns = 16 * d, leftIns = n - 1, pIns = tensIns / leftIns;
